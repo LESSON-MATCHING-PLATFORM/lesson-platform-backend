@@ -3,230 +3,286 @@ package com.kosa.fillinv.payment.service;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
-import com.kosa.fillinv.payment.domain.*;
+import com.kosa.fillinv.payment.domain.PSPConfirmationException;
+import com.kosa.fillinv.payment.domain.PSPConfirmationStatus;
+import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
+import com.kosa.fillinv.payment.domain.PaymentExtraDetails;
+import com.kosa.fillinv.payment.domain.PaymentMethod;
+import com.kosa.fillinv.payment.domain.PaymentType;
 import com.kosa.fillinv.payment.entity.Payment;
-import com.kosa.fillinv.payment.entity.PaymentHistory;
 import com.kosa.fillinv.payment.entity.PaymentStatus;
-import com.kosa.fillinv.payment.repository.PaymentHistoryRepository;
 import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
+import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import jakarta.persistence.EntityManager;
+import com.kosa.fillinv.schedule.service.ScheduleService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.annotation.Transactional;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
-@SpringBootTest
-@Transactional
-@ActiveProfiles("local")
+@ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
 
-    @MockitoBean
-    private ScheduleRepository scheduleRepository;
+    @Mock
+    private PaymentUpdateService paymentUpdateService;
 
-    @MockitoBean
+    @Mock
     private TossPaymentClient tossPaymentClient;
 
-    @Autowired
-    private PaymentService paymentService;
-    @Autowired
+    @Mock
     private PaymentRepository paymentRepository;
-    @Autowired
-    private PaymentHistoryRepository paymentHistoryRepository;
 
-    @Autowired
-    private EntityManager entityManager;
+    @Mock
+    private ScheduleRepository scheduleRepository;
 
-    private static PaymentExecutionResult createSuccessResult(String paymentKey, CheckoutResult checkout) {
-        PaymentExtraDetails paymentExtraDetails = new PaymentExtraDetails(
-                PaymentType.NORMAL,
-                PaymentMethod.EASY_PAY,
-                Instant.now(),
-                checkout.orderName(),
-                PSPConfirmationStatus.DONE,
-                (long) checkout.amount(),
-                ""
-        );
+    @Mock
+    private ScheduleService scheduleService;
 
+    @Mock
+    private EventPublisher eventPublisher;
+
+    @InjectMocks
+    private PaymentService paymentService;
+
+    @Test
+    @DisplayName("checkout 시 스케줄 스냅샷으로 Payment를 생성한다")
+    void checkout_createsPaymentFromScheduleSnapshot() {
+        Schedule schedule = paymentPendingSchedule();
+        given(scheduleRepository.findById(schedule.getId()))
+                .willReturn(Optional.of(schedule));
+
+        CheckoutResult result = paymentService.checkout(new CheckoutCommand(schedule.getId()));
+
+        Payment savedPayment = savedPayment();
+        assertThat(savedPayment.getOrderId()).isEqualTo(schedule.getId());
+        assertThat(savedPayment.getOrderName()).isEqualTo("자바 멘토링 - 30분");
+        assertThat(savedPayment.getBuyerId()).isEqualTo(schedule.getMenteeId());
+        assertThat(savedPayment.getSellerId()).isEqualTo(schedule.getMentorId());
+        assertThat(savedPayment.getAmount()).isEqualTo(schedule.getPrice());
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.NOT_STARTED);
+
+        assertThat(result.orderId()).isEqualTo(schedule.getId());
+        assertThat(result.orderName()).isEqualTo(savedPayment.getOrderName());
+        assertThat(result.amount()).isEqualTo(savedPayment.getAmount());
+    }
+
+    @Test
+    @DisplayName("checkout 중복 요청 시 기존 Payment를 재사용하고 새로 저장하지 않는다")
+    void checkout_whenPaymentAlreadyExists_reusesExistingPayment() {
+        Payment existingPayment = payment();
+        given(paymentRepository.findByOrderId(existingPayment.getOrderId()))
+                .willReturn(Optional.of(existingPayment));
+
+        CheckoutResult result = paymentService.checkout(new CheckoutCommand(existingPayment.getOrderId()));
+
+        assertThat(result.orderId()).isEqualTo(existingPayment.getOrderId());
+        assertThat(result.orderName()).isEqualTo(existingPayment.getOrderName());
+        assertThat(result.amount()).isEqualTo(existingPayment.getAmount());
+        verify(scheduleRepository, never()).findById(any());
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("confirm 성공 시 결제를 SUCCESS로 변경하고 스케줄 결제 완료 처리를 호출한다")
+    void confirm_success_updatesPaymentAndCompletesSchedulePayment() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(result.failure()).isNull();
+
+        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+                command.paymentKey(),
+                command.orderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+                command.paymentKey(),
+                command.orderId(),
+                PaymentStatus.SUCCESS,
+                successResult(command).paymentExtraDetails(),
+                null
+        ));
+        verify(scheduleService).completePayment(command.orderId());
+    }
+
+    @Test
+    @DisplayName("이미 SUCCESS인 결제 confirm 요청은 Toss를 다시 호출하지 않고 성공으로 응답한다")
+    void confirm_whenPaymentAlreadySuccess_skipsTossConfirm() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(successPayment()));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(result.failure()).isNull();
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(scheduleService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 스케줄은 변경하지 않는다")
+    void confirm_failure_updatesPaymentFailureOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willThrow(failureException());
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.FAILURE);
+        assertThat(result.failure().errorCode()).isEqualTo("REJECT_CARD_PAYMENT");
+
+        PaymentStatusUpdateCommand failureCommand = lastPaymentUpdateCommand();
+        assertThat(failureCommand.status()).isEqualTo(PaymentStatus.FAILURE);
+        assertThat(failureCommand.failure().message()).isEqualTo("잔액 부족");
+        verify(scheduleService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 스케줄은 변경하지 않는다")
+    void confirm_timeout_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willThrow(new ResourceAccessException("timeout"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("ResourceAccessException");
+
+        PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
+        assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(scheduleService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("스케줄 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
+    void confirm_whenScheduleCompleteFails_keepsPaymentSuccess() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        givenFailureWhenScheduleComplete(command.orderId());
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(result.failure()).isNull();
+
+        PaymentStatusUpdateCommand lastCommand = lastPaymentUpdateCommand();
+        assertThat(lastCommand.status()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(scheduleService).completePayment(command.orderId());
+    }
+
+    private void givenFailureWhenScheduleComplete(String orderId) {
+        org.mockito.Mockito.doThrow(new IllegalStateException("invalid schedule status"))
+                .when(scheduleService)
+                .completePayment(orderId);
+    }
+
+    private Payment savedPayment() {
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    private PaymentStatusUpdateCommand lastPaymentUpdateCommand() {
+        ArgumentCaptor<PaymentStatusUpdateCommand> captor = ArgumentCaptor.forClass(PaymentStatusUpdateCommand.class);
+        verify(paymentUpdateService, org.mockito.Mockito.atLeastOnce()).updateStatus(captor.capture());
+        return captor.getValue();
+    }
+
+    private PaymentConfirmCommand confirmCommand() {
+        return new PaymentConfirmCommand("payment-key-001", "schedule-001", 30000);
+    }
+
+    private Payment successPayment() {
+        Payment payment = payment();
+        payment.markExecuting();
+        payment.markSuccess();
+        return payment;
+    }
+
+    private Payment payment() {
+        return Payment.builder()
+                .id("payment-001")
+                .buyerId("mentee-001")
+                .sellerId("mentor-001")
+                .orderId("schedule-001")
+                .orderName("자바 멘토링 - 30분")
+                .amount(30000)
+                .build();
+    }
+
+    private PaymentExecutionResult successResult(PaymentConfirmCommand command) {
         return new PaymentExecutionResult(
-                paymentKey,
-                checkout.orderId(),
-                paymentExtraDetails
+                command.paymentKey(),
+                command.orderId(),
+                new PaymentExtraDetails(
+                        PaymentType.NORMAL,
+                        PaymentMethod.EASY_PAY,
+                        Instant.parse("2026-07-24T05:00:00Z"),
+                        "자바 멘토링 - 30분",
+                        PSPConfirmationStatus.DONE,
+                        command.amount().longValue(),
+                        "raw"
+                )
         );
     }
 
-    private static PSPConfirmationException createFailException() {
+    private PSPConfirmationException failureException() {
         return new PSPConfirmationException(
-                "404", "Not Found", false, true, false, false
+                "REJECT_CARD_PAYMENT",
+                "잔액 부족",
+                false,
+                true,
+                false,
+                false
         );
     }
 
-    @Test
-    @DisplayName("결제 시도 시 Payment가 생성된다")
-    void checkout() {
-        // given
-        String scheduleId = "dummyScheduleId";
-        Schedule schedule = createMentoringSchedule(scheduleId);
-
-        given(scheduleRepository.findById(scheduleId))
-                .willReturn(Optional.of(schedule));
-
-        // when
-        CheckoutResult checkout = paymentService.checkout(new CheckoutCommand(scheduleId));
-        entityManager.flush();
-        entityManager.clear();
-
-        // then
-        Payment payment = paymentRepository.findByOrderId(scheduleId).orElseThrow();
-        assertThat(payment).isNotNull();
-        assertThat(payment.getAmount()).isEqualTo(schedule.getPrice());
-        assertThat(payment.getOrderId()).isEqualTo(scheduleId);
-        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.NOT_STARTED);
-        assertThat(payment.getBuyerId()).isEqualTo(schedule.getMenteeId());
-        assertThat(payment.getSellerId()).isEqualTo(schedule.getMentorId());
-
-        assertThat(checkout.orderId()).isEqualTo(payment.getOrderId());
-        assertThat(checkout.amount()).isEqualTo(payment.getAmount());
-        assertThat(checkout.orderName()).isEqualTo(payment.getOrderName());
-        System.out.println(payment.getOrderName());
-    }
-
-    /**
-     * Toss Confirm Api 요청에 대한 응답이 정상적으로 도착하고
-     * 결과가 SUCCESS 인 걍우
-     * Payment의 Status는 SUCEESS이며
-     * Payment History는 NOT_STARTED -> EXECUTING, EXECUTING -> SUCCESS 가 누적된다.
-     **/
-    @Test
-    @DisplayName("결제 승인 성공 시 Payment 상태가 SUCCESS로 변경되고 History가 기록된다")
-    public void confirm() {
-        // given
-        String scheduleId = "dummyScheduleId";
-        Schedule schedule = createMentoringSchedule(scheduleId);
-
-        given(scheduleRepository.findById(scheduleId))
-                .willReturn(Optional.of(schedule));
-
-        CheckoutResult checkout = paymentService.checkout(new CheckoutCommand(scheduleId));
-        entityManager.flush();
-        entityManager.clear();
-
-        String paymentKey = "dummyPaymentKey";
-        PaymentConfirmCommand command = new PaymentConfirmCommand(
-                paymentKey, checkout.orderId(), checkout.amount()
-        );
-
-        given(tossPaymentClient.confirm(command))
-                .willReturn(createSuccessResult(paymentKey, checkout));
-
-        // when
-        PaymentConfirmResult confirm = paymentService.confirm(command);
-        entityManager.flush();
-        entityManager.clear();
-
-        // then
-        Payment payment = paymentRepository.findByOrderId(checkout.orderId()).orElseThrow();
-        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
-
-        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
-        assertThat(histories).hasSize(2);
-        assertThat(histories.stream().map(PaymentHistory::getPreviousStatus).toList())
-                .contains(PaymentStatus.NOT_STARTED, PaymentStatus.EXECUTING);
-        assertThat(histories.stream().map(PaymentHistory::getNewStatus).toList())
-                .contains(PaymentStatus.EXECUTING, PaymentStatus.SUCCESS);
-    }
-
-    @Test
-    @DisplayName("결제 승인 실패 시 Payment 상태가 FAILURE로 변경되고 History가 기록된다")
-    void confirmFail() {
-        // given
-        String scheduleId = "dummyScheduleId";
-        Schedule schedule = createMentoringSchedule(scheduleId);
-
-        given(scheduleRepository.findById(scheduleId))
-                .willReturn(Optional.of(schedule));
-
-        CheckoutResult checkout = paymentService.checkout(new CheckoutCommand(scheduleId));
-        entityManager.flush();
-        entityManager.clear();
-
-        String paymentKey = "dummyPaymentKey";
-        PaymentConfirmCommand command = new PaymentConfirmCommand(
-                paymentKey, checkout.orderId(), checkout.amount()
-        );
-
-        given(tossPaymentClient.confirm(command))
-                .willThrow(createFailException());
-
-        // when
-        PaymentConfirmResult confirm = paymentService.confirm(command);
-
-        // then
-        Payment payment = paymentRepository.findByOrderId(checkout.orderId()).orElseThrow();
-        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
-
-        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.FAILURE);
-        assertThat(histories).hasSize(2);
-        assertThat(histories.stream().map(PaymentHistory::getPreviousStatus).toList())
-                .contains(PaymentStatus.NOT_STARTED, PaymentStatus.EXECUTING);
-        assertThat(histories.stream().map(PaymentHistory::getNewStatus).toList())
-                .contains(PaymentStatus.EXECUTING, PaymentStatus.FAILURE);
-    }
-
-    private Schedule createMentoringSchedule(String scheduleId) {
-        Schedule schedule = Schedule.builder()
-                .id(scheduleId)
-                .status(ScheduleStatus.APPROVED)
+    private Schedule paymentPendingSchedule() {
+        return Schedule.builder()
+                .id("schedule-001")
+                .status(ScheduleStatus.PAYMENT_PENDING)
                 .requestContent("멘토링 신청합니다")
-
-                /* Lesson Snapshot */
                 .lessonTitle("자바 멘토링")
                 .lessonType("MENTORING")
                 .lessonDescription("자바 백엔드 멘토링")
                 .lessonLocation("ONLINE")
                 .lessonCategoryName("개발")
                 .mentorNickname("멘토닉")
-
-                /* Option Snapshot */
                 .optionName("30분")
                 .optionMinute(30)
                 .price(30000)
-
-                /* FK */
                 .lessonId("lesson-001")
                 .menteeId("mentee-001")
                 .mentorId("mentor-001")
                 .optionId("option-001")
                 .availableTimeId(null)
-                .scheduleTimeList(new ArrayList<>())
                 .build();
-
-        // ScheduleTime 더미 1개 추가
-        ScheduleTime scheduleTime = ScheduleTime.of(
-                Instant.parse("2025-01-10T10:00:00Z"),
-                Instant.parse("2025-01-10T10:30:00Z"),
-                schedule
-        );
-
-        schedule.addScheduleTime(scheduleTime);
-
-        return schedule;
     }
-
 }

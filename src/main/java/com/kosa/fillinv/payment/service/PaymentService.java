@@ -17,6 +17,7 @@ import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
 import com.kosa.fillinv.schedule.service.ScheduleService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.ResourceAccessException;
@@ -26,6 +27,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentService {
 
     private final PaymentUpdateService paymentUpdateService;
@@ -43,6 +45,16 @@ public class PaymentService {
     public CheckoutResult checkout(CheckoutCommand command) {
 
         String scheduleId = command.scheduleId();
+
+        Payment existingPayment = paymentRepository.findByOrderId(scheduleId)
+                .orElse(null);
+        if (existingPayment != null) {
+            return new CheckoutResult(
+                    existingPayment.getOrderId(),
+                    existingPayment.getOrderName(),
+                    existingPayment.getAmount()
+            );
+        }
 
         // 결제할 스케쥴 정보 조회
         Schedule schedule = scheduleRepository.findById(scheduleId)
@@ -72,6 +84,12 @@ public class PaymentService {
      * */
     public PaymentConfirmResult confirm(PaymentConfirmCommand command) {
         try {
+            Payment existingPayment = paymentRepository.findByOrderId(command.orderId())
+                    .orElse(null);
+            if (existingPayment != null && existingPayment.getPaymentStatus() == PaymentStatus.SUCCESS) {
+                return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
+            }
+
             // 결제 상태 진행 중으로 변경
             paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
                     command.paymentKey(),
@@ -95,8 +113,7 @@ public class PaymentService {
                     )
             );
 
-            // Todo TOSS confirm api는 성공하고 결제 상태 변경은 성공했으나 ScheduleStatus 변경에 실패한 경우 별도 처리 필요
-            scheduleService.completePayment(command.orderId());
+            completeSchedulePayment(command.orderId());
 
             return new PaymentConfirmResult(
                     PaymentStatus.SUCCESS,
@@ -137,5 +154,13 @@ public class PaymentService {
         );
 
         return new PaymentConfirmResult(status, failure);
+    }
+
+    private void completeSchedulePayment(String orderId) {
+        try {
+            scheduleService.completePayment(orderId);
+        } catch (Exception e) {
+            log.error("Payment confirmed, but schedule payment completion failed. orderId={}", orderId, e);
+        }
     }
 }
