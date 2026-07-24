@@ -11,6 +11,7 @@ import com.kosa.fillinv.payment.domain.PaymentMethod;
 import com.kosa.fillinv.payment.domain.PaymentType;
 import com.kosa.fillinv.payment.entity.Payment;
 import com.kosa.fillinv.payment.entity.PaymentStatus;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
@@ -19,6 +20,7 @@ import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
 import com.kosa.fillinv.schedule.service.ScheduleService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +28,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
@@ -34,6 +38,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -56,10 +61,22 @@ class PaymentServiceTest {
     private ScheduleService scheduleService;
 
     @Mock
-    private EventPublisher eventPublisher;
+    private PaymentOutboxService paymentOutboxService;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
 
     @InjectMocks
     private PaymentService paymentService;
+
+    @BeforeEach
+    void setUpTransactionTemplate() {
+        lenient().when(transactionTemplate.execute(any()))
+                .thenAnswer(invocation -> {
+                    TransactionCallback<?> callback = invocation.getArgument(0);
+                    return callback.doInTransaction(null);
+                });
+    }
 
     @Test
     @DisplayName("checkout 시 스케줄 스냅샷으로 Payment를 생성한다")
@@ -126,6 +143,7 @@ class PaymentServiceTest {
                 null
         ));
         verify(scheduleService).completePayment(command.orderId());
+        verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
     @Test
@@ -142,6 +160,7 @@ class PaymentServiceTest {
         verify(tossPaymentClient, never()).confirm(any());
         verify(paymentUpdateService, never()).updateStatus(any());
         verify(scheduleService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
     @Test
@@ -160,6 +179,7 @@ class PaymentServiceTest {
         assertThat(failureCommand.status()).isEqualTo(PaymentStatus.FAILURE);
         assertThat(failureCommand.failure().message()).isEqualTo("잔액 부족");
         verify(scheduleService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
     @Test
@@ -177,6 +197,7 @@ class PaymentServiceTest {
         PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
         assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
         verify(scheduleService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
     @Test
@@ -195,6 +216,7 @@ class PaymentServiceTest {
         PaymentStatusUpdateCommand lastCommand = lastPaymentUpdateCommand();
         assertThat(lastCommand.status()).isEqualTo(PaymentStatus.SUCCESS);
         verify(scheduleService).completePayment(command.orderId());
+        verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
     private void givenFailureWhenScheduleComplete(String orderId) {
