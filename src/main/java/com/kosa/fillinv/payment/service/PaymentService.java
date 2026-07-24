@@ -33,6 +33,7 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final ScheduleRepository scheduleRepository;
     private final ScheduleService scheduleService;
+    private final EventPublisher eventPublisher;
 
     /*
      * 스케쥴에 대한 Payment 객체를 생성 및 데이터베이스에 저장
