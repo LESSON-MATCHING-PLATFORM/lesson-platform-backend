@@ -47,6 +47,15 @@ public class Refund {
     @Column(name = "psp_raw")
     private String pspRaw;
 
+    @Column(name = "last_attempted_at")
+    private Instant lastAttemptedAt;
+
+    @Column(name = "next_attemp_at")
+    private Instant nextAttemptAt;
+
+    @Column(name = "retry_count")
+    private Integer retryCount;
+
     @Builder
     public Refund(String id,
                   String paymentId,
@@ -62,6 +71,7 @@ public class Refund {
         this.refundStatus = refundStatus;
         this.refundAmount = refundAmount;
         this.refundReason = refundReason;
+        this.retryCount = 0;
     }
 
     @PrePersist
@@ -69,11 +79,13 @@ public class Refund {
         this.createdAt = Instant.now();
     }
 
-    public void markExecuting() {
+    public void markExecuting(Instant lastAttemptedAt) {
         if (refundStatus == RefundStatus.NOT_STARTED ||
                 refundStatus == RefundStatus.UNKNOWN) {
 
             refundStatus = RefundStatus.EXECUTING;
+            this.lastAttemptedAt = lastAttemptedAt;
+            this.retryCount++;
             return;
         }
 
@@ -96,12 +108,14 @@ public class Refund {
                 "SUCCESS 상태로 변경할 수 없습니다. 현재 상태: " + refundStatus);
     }
 
-    public void markFail() {
+    public void markFail(Instant nextAttemptAt) {
         if (refundStatus == RefundStatus.NOT_STARTED ||
                 refundStatus == RefundStatus.EXECUTING ||
                 refundStatus == RefundStatus.UNKNOWN) {
 
             refundStatus = RefundStatus.FAILURE;
+            this.nextAttemptAt = nextAttemptAt;
+            this.retryCount++;
             return;
         }
 
@@ -109,11 +123,13 @@ public class Refund {
                 "FAILURE 상태로 변경할 수 없습니다. 현재 상태: " + refundStatus);
     }
 
-    public void markUnknown() {
+    public void markUnknown(Instant nextAttemptAt) {
         if (refundStatus == RefundStatus.NOT_STARTED ||
                 refundStatus == RefundStatus.EXECUTING) {
 
-            refundStatus = RefundStatus.UNKNOWN;
+            this.refundStatus = RefundStatus.UNKNOWN;
+            this.nextAttemptAt = nextAttemptAt;
+            this.retryCount++;
             return;
         }
 
