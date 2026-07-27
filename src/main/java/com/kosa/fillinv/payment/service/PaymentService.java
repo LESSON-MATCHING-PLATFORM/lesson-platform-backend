@@ -16,7 +16,7 @@ import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.ScheduleService;
+import com.kosa.fillinv.schedule.service.ScheduleCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

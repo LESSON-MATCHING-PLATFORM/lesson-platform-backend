@@ -9,15 +9,12 @@ import com.kosa.fillinv.schedule.dto.response.CreateScheduleResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleListResponse;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.service.ScheduleCreateService;
-import com.kosa.fillinv.schedule.service.ScheduleInquiryService;
-import com.kosa.fillinv.schedule.service.ScheduleService;
+import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.schedule.service.ScheduleReadService;
 import com.kosa.fillinv.schedule.service.dto.ScheduleSearchCondition;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
-import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,9 +34,8 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 @RequestMapping("/api/v1/schedules")
 public class ScheduleController {
 
-    private final ScheduleCreateService scheduleCreateService;
-    private final ScheduleInquiryService scheduleInquiryService;
-    private final ScheduleService scheduleService;
+    private final ScheduleCommandService scheduleCommandService;
+    private final ScheduleReadService scheduleReadService;
 
     // 스케쥴 생성
     @PostMapping
@@ -49,7 +45,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        String scheduleId = scheduleCreateService.createSchedule(memberId, request);
+        String scheduleId = scheduleCommandService.createSchedule(memberId, request);
 
         // 요청 주소 - ServletUriComponentsBuilder 사용 시 서버 주소가 바뀌더라도 코드를 수정하지 않아도 됨
         // 멘토, 멘티의 스케쥴 상세 보기 주소를 Location 헤더에 담아주기
@@ -74,7 +70,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        ScheduleDetailResponse response = scheduleInquiryService.getScheduleDetail(memberId, scheduleId, scheduleTimeId);
+        ScheduleDetailResponse response = scheduleReadService.getScheduleDetail(memberId, scheduleId, scheduleTimeId);
 
         return ResponseEntity
                 .ok(SuccessResponse.success(HttpStatus.OK, response));
@@ -92,7 +88,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleService.searchUpcomingSchedules(
+        Page<ScheduleListResponse> responses = scheduleReadService.searchUpcomingSchedules(
                 memberId,
                 ScheduleSearchCondition.builder()
                         .from(from)
@@ -118,7 +114,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleService.searchPastSchedules(
+        Page<ScheduleListResponse> responses = scheduleReadService.searchPastSchedules(
                 memberId,
                 ScheduleSearchCondition.builder()
                         .to(to)
@@ -143,7 +139,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleService.calendar(
+        Page<ScheduleListResponse> responses = scheduleReadService.calendar(
                 memberId,
                 start,
                 end,
@@ -163,7 +159,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleService.search(condition.withMemberId(memberId));
+        Page<ScheduleListResponse> responses = scheduleReadService.search(condition.withMemberId(memberId));
 
         return ResponseEntity
                 .ok(SuccessResponse.success(HttpStatus.OK, responses));
@@ -180,50 +176,12 @@ public class ScheduleController {
         String memberId = customMemberDetails.memberId();
 
         switch (next) {
-            case APPROVED -> scheduleService.approveLessonByMentor(memberId, scheduleId);
-            case CANCELED -> scheduleService.rejectLessonByMentor(memberId, scheduleId);
-            case COMPLETED -> scheduleService.completeLesson(memberId, scheduleId);
+            case APPROVED -> scheduleCommandService.approveLessonByMentor(memberId, scheduleId);
+            case CANCELED -> scheduleCommandService.rejectLessonByMentor(memberId, scheduleId);
+            case COMPLETED -> scheduleCommandService.completeLesson(memberId, scheduleId);
             default -> throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
         return ResponseEntity.ok(SuccessResponse.success(HttpStatus.OK));
     }
-
-
-    // 상태 일치 스케쥴 조회
-    // Ex: GET /api/v1/schedules/1/status/PAYMENT_PENDING
-    @GetMapping("/{scheduleId}/status/{status}")
-    public ResponseEntity<SuccessResponse<ScheduleListResponse>> getScheduleByStatus(
-            @PathVariable String scheduleId,
-            @PathVariable ScheduleStatus status
-    ) {
-        ScheduleListResponse response = scheduleInquiryService.getScheduleByStatus(scheduleId, status);
-
-        return ResponseEntity
-                .ok(SuccessResponse.success(HttpStatus.OK, response));
-    }
-
-    // 멘티 모드: 내 수강 신청 목록 조회 (페이지네이션)
-    // Ex: GET /api/v1/schedules/mentee/12?page=0&size=10
-    @GetMapping("/mentee/{memberId}") // role=MENTOR or role=MENTEE
-    public ResponseEntity<SuccessResponse<Page<ScheduleListResponse>>> getMenteeSchedules(
-            @PathVariable String memberId,
-            // 기본 10개씩, 생성일자 기준 내림차순(최신순)
-            @ParameterObject Pageable pageable
-    ) {
-        Page<ScheduleListResponse> responses = scheduleInquiryService.getMenteeSchedules(memberId, pageable);
-        return ResponseEntity.ok(SuccessResponse.success(HttpStatus.OK, responses));
-    }
-
-    // 멘토 모드: 내 수업 일정 목록 조회 (페이지네이션)
-    // Ex: GET /api/v1/schedules/mentor/11?page=0&size=10
-    @GetMapping("/mentor/{memberId}") // role=MENTOR or role=MENTEE
-    public ResponseEntity<SuccessResponse<Page<ScheduleListResponse>>> getMentorSchedules(
-            @PathVariable String memberId,
-            @ParameterObject Pageable pageable
-    ) {
-        Page<ScheduleListResponse> responses = scheduleInquiryService.getMentorSchedules(memberId, pageable);
-        return ResponseEntity.ok(SuccessResponse.success(HttpStatus.OK, responses));
-    }
-
 }
