@@ -9,6 +9,7 @@ import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
 import com.kosa.fillinv.payment.domain.PaymentFailure;
 import com.kosa.fillinv.payment.entity.Payment;
 import com.kosa.fillinv.payment.entity.PaymentStatus;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
@@ -17,8 +18,10 @@ import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
 import com.kosa.fillinv.schedule.service.ScheduleCommandService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.sql.SQLException;
@@ -26,13 +29,16 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentService {
 
     private final PaymentUpdateService paymentUpdateService;
     private final TossPaymentClient tossPaymentClient;
     private final PaymentRepository paymentRepository;
     private final ScheduleRepository scheduleRepository;
-    private final ScheduleCommandService scheduleCommandService;
+    private final ScheduleService scheduleService;
+    private final PaymentOutboxService paymentOutboxService;
+    private final TransactionTemplate transactionTemplate;
 
     /*
      * 스케쥴에 대한 Payment 객체를 생성 및 데이터베이스에 저장
@@ -42,6 +48,16 @@ public class PaymentService {
     public CheckoutResult checkout(CheckoutCommand command) {
 
         String scheduleId = command.scheduleId();
+
+        Payment existingPayment = paymentRepository.findByOrderId(scheduleId)
+                .orElse(null);
+        if (existingPayment != null) {
+            return new CheckoutResult(
+                    existingPayment.getOrderId(),
+                    existingPayment.getOrderName(),
+                    existingPayment.getAmount()
+            );
+        }
 
         // 결제할 스케쥴 정보 조회
         Schedule schedule = scheduleRepository.findById(scheduleId)
@@ -71,31 +87,16 @@ public class PaymentService {
      * */
     public PaymentConfirmResult confirm(PaymentConfirmCommand command) {
         try {
-            // 결제 상태 진행 중으로 변경
-            paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
-                    command.paymentKey(),
-                    command.orderId(),
-                    PaymentStatus.EXECUTING,
-                    null,
-                    null
-            ));
+            if (isAlreadySucceeded(command.orderId())) {
+                return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
+            }
 
-            // 외부 결제사에게 승인 요청
+            markPaymentExecuting(command);
+
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
-            // 결제 상태 성공으로 변경
-            paymentUpdateService.updateStatus(
-                    new PaymentStatusUpdateCommand(
-                            command.paymentKey(),
-                            command.orderId(),
-                            PaymentStatus.SUCCESS,
-                            result.paymentExtraDetails(),
-                            null
-                    )
-            );
-
-            // Todo TOSS confirm api는 성공하고 결제 상태 변경은 성공했으나 ScheduleStatus 변경에 실패한 경우 별도 처리 필요
-            scheduleCommandService.completePayment(command.orderId());
+            completePaymentSuccess(command, result);
+            completeSchedulePayment(command.orderId());
 
             return new PaymentConfirmResult(
                     PaymentStatus.SUCCESS,
@@ -125,16 +126,66 @@ public class PaymentService {
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         }
 
-        paymentUpdateService.updateStatus(
-                new PaymentStatusUpdateCommand(
-                        command.paymentKey(),
-                        command.orderId(),
-                        status,
-                        null,
-                        failure
-                )
-        );
+        markPaymentFailedOrUnknown(command, status, failure);
 
         return new PaymentConfirmResult(status, failure);
+    }
+
+    private boolean isAlreadySucceeded(String orderId) {
+        return paymentRepository.findByOrderId(orderId)
+                .map(payment -> payment.getPaymentStatus() == PaymentStatus.SUCCESS)
+                .orElse(false);
+    }
+
+    private void markPaymentExecuting(PaymentConfirmCommand command) {
+        transactionTemplate.execute(status -> {
+            paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
+                    command.paymentKey(),
+                    command.orderId(),
+                    PaymentStatus.EXECUTING,
+                    null,
+                    null
+            ));
+            return null;
+        });
+    }
+
+    private void completePaymentSuccess(PaymentConfirmCommand command, PaymentExecutionResult result) {
+        transactionTemplate.execute(status -> {
+            paymentUpdateService.updateStatus(
+                    new PaymentStatusUpdateCommand(
+                            command.paymentKey(),
+                            command.orderId(),
+                            PaymentStatus.SUCCESS,
+                            result.paymentExtraDetails(),
+                            null
+                    )
+            );
+            paymentOutboxService.savePaymentCompletedEvent(command, result);
+            return null;
+        });
+    }
+
+    private void markPaymentFailedOrUnknown(PaymentConfirmCommand command, PaymentStatus status, PaymentFailure failure) {
+        transactionTemplate.execute(transactionStatus -> {
+            paymentUpdateService.updateStatus(
+                    new PaymentStatusUpdateCommand(
+                            command.paymentKey(),
+                            command.orderId(),
+                            status,
+                            null,
+                            failure
+                    )
+            );
+            return null;
+        });
+    }
+
+    private void completeSchedulePayment(String orderId) {
+        try {
+            scheduleService.completePayment(orderId);
+        } catch (Exception e) {
+            log.error("Payment confirmed, but schedule payment completion failed. orderId={}", orderId, e);
+        }
     }
 }

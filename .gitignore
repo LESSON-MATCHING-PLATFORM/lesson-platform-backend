@@ -109,3 +109,6 @@ application-local-test.yml
 
 # static files
 src/main/resources/files/
+
+# local planning docs
+portfolio/

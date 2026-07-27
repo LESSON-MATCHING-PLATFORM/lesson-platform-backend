@@ -8,3 +8,7 @@ server:
 logging:
   level:
     root: INFO
+
+payment:
+  outbox:
+    publish-fixed-delay-ms: 5000
