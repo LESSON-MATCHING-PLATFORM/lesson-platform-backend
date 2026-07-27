@@ -14,6 +14,8 @@ import java.util.List;
 @Repository
 public interface RefundRepository extends JpaRepository<Refund, String> {
 
+    boolean existsByPaymentId(String paymentId);
+
     @Query("select r.retryCount from Refund r where r.id = :refundId")
     Integer getRetryCountByRefundId(@Param("refundId") String refundId);
 
