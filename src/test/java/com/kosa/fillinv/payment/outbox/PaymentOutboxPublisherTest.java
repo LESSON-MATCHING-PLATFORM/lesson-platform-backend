@@ -31,8 +31,7 @@ class PaymentOutboxPublisherTest {
     @DisplayName("READY Outbox 이벤트 발행 성공 시 PUBLISHED로 변경한다")
     void publishReadyEvents_marksPublishedOnSuccess() {
         PaymentOutboxEvent event = outboxEvent("event-001");
-        given(paymentOutboxRepository.findTop100ByStatusOrderByCreatedAtAsc(PaymentOutboxStatus.READY))
-                .willReturn(List.of(event));
+        givenPublishableEvents(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
@@ -43,11 +42,25 @@ class PaymentOutboxPublisherTest {
     }
 
     @Test
+    @DisplayName("FAILED Outbox 이벤트도 최대 재시도 횟수 전이면 다시 발행한다")
+    void publishReadyEvents_retriesFailedEventBeforeMaxRetryCount() {
+        PaymentOutboxEvent event = outboxEvent("event-001");
+        event.markFailed("previous failure");
+        givenPublishableEvents(event);
+
+        paymentOutboxPublisher.publishReadyEvents();
+
+        verify(eventPublisher).publish(event);
+        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.PUBLISHED);
+        assertThat(event.getRetryCount()).isEqualTo(1);
+        assertThat(event.getLastError()).isNull();
+    }
+
+    @Test
     @DisplayName("READY Outbox 이벤트 발행 실패 시 FAILED로 변경하고 retryCount를 증가시킨다")
     void publishReadyEvents_marksFailedOnError() {
         PaymentOutboxEvent event = outboxEvent("event-001");
-        given(paymentOutboxRepository.findTop100ByStatusOrderByCreatedAtAsc(PaymentOutboxStatus.READY))
-                .willReturn(List.of(event));
+        givenPublishableEvents(event);
         doThrow(new IllegalStateException("kafka down"))
                 .when(eventPublisher)
                 .publish(event);
@@ -57,6 +70,32 @@ class PaymentOutboxPublisherTest {
         assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.FAILED);
         assertThat(event.getRetryCount()).isEqualTo(1);
         assertThat(event.getLastError()).contains("kafka down");
+    }
+
+    @Test
+    @DisplayName("Outbox publisher는 READY와 FAILED 중 retryCount가 3 미만인 이벤트만 조회한다")
+    void publishReadyEvents_queriesPublishableEventsBelowMaxRetryCount() {
+        PaymentOutboxEvent event = outboxEvent("event-001");
+        given(paymentOutboxRepository.findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
+                List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
+                3
+        ))
+                .willReturn(List.of(event));
+
+        paymentOutboxPublisher.publishReadyEvents();
+
+        verify(paymentOutboxRepository).findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
+                List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
+                3
+        );
+    }
+
+    private void givenPublishableEvents(PaymentOutboxEvent event) {
+        given(paymentOutboxRepository.findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
+                List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
+                3
+        ))
+                .willReturn(List.of(event));
     }
 
     private PaymentOutboxEvent outboxEvent(String id) {
