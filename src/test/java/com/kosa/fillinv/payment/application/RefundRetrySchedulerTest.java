@@ -35,36 +35,36 @@ class RefundRetrySchedulerTest {
     private RefundRetryScheduler refundRetryScheduler;
 
     @Test
-    @DisplayName("UNKNOWN 환불 중 재시도 횟수와 시간이 충족된 건만 조회한다")
-    void retryUnknownRefunds_queriesRetryableUnknownRefunds() {
-        given(refundRepository.findTop100ByRefundStatusAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+    @DisplayName("UNKNOWN과 FAILURE 환불 중 재시도 횟수와 시간이 충족된 건만 조회한다")
+    void retryFailedRefunds_queriesRetryableRefunds() {
+        given(refundRepository.findTop100ByRefundStatusInAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
                 any(),
                 any(),
                 any()
         ))
                 .willReturn(List.of());
 
-        refundRetryScheduler.retryUnknownRefunds();
+        refundRetryScheduler.retryFailedRefunds();
 
-        verify(refundRepository).findTop100ByRefundStatusAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
-                eq(RefundStatus.UNKNOWN),
+        verify(refundRepository).findTop100ByRefundStatusInAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+                eq(List.of(RefundStatus.UNKNOWN, RefundStatus.FAILURE)),
                 eq(3),
                 any(Instant.class)
         );
     }
 
     @Test
-    @DisplayName("조회된 UNKNOWN 환불을 RefundProcessor에 재처리 요청한다")
-    void retryUnknownRefunds_delegatesToRefundProcessor() {
+    @DisplayName("조회된 재시도 대상 환불을 RefundProcessor에 재처리 요청한다")
+    void retryFailedRefunds_delegatesToRefundProcessor() {
         Refund refund = refund();
-        given(refundRepository.findTop100ByRefundStatusAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+        given(refundRepository.findTop100ByRefundStatusInAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
                 any(),
                 any(),
                 any()
         ))
                 .willReturn(List.of(refund));
 
-        refundRetryScheduler.retryUnknownRefunds();
+        refundRetryScheduler.retryFailedRefunds();
 
         ArgumentCaptor<PGCancelCommand> captor = ArgumentCaptor.forClass(PGCancelCommand.class);
         verify(refundProcessor).processPGCancel(captor.capture());

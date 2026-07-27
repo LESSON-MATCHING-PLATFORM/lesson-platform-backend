@@ -27,30 +27,40 @@ class RefundRepositoryTest {
     private EntityManager entityManager;
 
     @Test
-    @DisplayName("재시도 대상 UNKNOWN 환불만 조회한다")
-    void findRetryableUnknownRefunds() {
+    @DisplayName("재시도 대상 UNKNOWN과 FAILURE 환불만 조회한다")
+    void findRetryableRefunds() {
         Instant now = Instant.parse("2026-07-27T00:00:00Z");
-        Refund retryable = unknownRefund("retryable", 2, now.minusSeconds(1));
-        Refund future = unknownRefund("future", 2, now.plusSeconds(1));
-        Refund exhausted = unknownRefund("exhausted", 3, now.minusSeconds(1));
+        Refund unknown = unknownRefund("unknown", 2, now.minusSeconds(1));
         Refund failure = failureRefund("failure", 2, now.minusSeconds(1));
+        Refund futureUnknown = unknownRefund("future-unknown", 2, now.plusSeconds(1));
+        Refund exhaustedUnknown = unknownRefund("exhausted-unknown", 3, now.minusSeconds(1));
+        Refund futureFailure = failureRefund("future-failure", 2, now.plusSeconds(1));
+        Refund exhaustedFailure = failureRefund("exhausted-failure", 3, now.minusSeconds(1));
         Refund success = successRefund("success", 2);
 
-        refundRepository.saveAll(List.of(retryable, future, exhausted, failure, success));
+        refundRepository.saveAll(List.of(
+                unknown,
+                failure,
+                futureUnknown,
+                exhaustedUnknown,
+                futureFailure,
+                exhaustedFailure,
+                success
+        ));
 
         entityManager.flush();
         entityManager.clear();
 
         List<Refund> refunds = refundRepository
-                .findTop100ByRefundStatusAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
-                        RefundStatus.UNKNOWN,
+                .findTop100ByRefundStatusInAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+                        List.of(RefundStatus.UNKNOWN, RefundStatus.FAILURE),
                         3,
                         now
                 );
 
         assertThat(refunds)
                 .extracting(Refund::getId)
-                .containsExactly("retryable");
+                .containsExactlyInAnyOrder("unknown", "failure");
     }
 
     private Refund unknownRefund(String id, int attemptCount, Instant nextAttemptAt) {

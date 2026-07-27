@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -16,8 +17,8 @@ public interface RefundRepository extends JpaRepository<Refund, String> {
     @Query("select r.retryCount from Refund r where r.id = :refundId")
     Integer getRetryCountByRefundId(@Param("refundId") String refundId);
 
-    List<Refund> findTop100ByRefundStatusAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
-            RefundStatus refundStatus,
+    List<Refund> findTop100ByRefundStatusInAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+            Collection<RefundStatus> refundStatuses,
             Integer retryCount,
             Instant now
     );
