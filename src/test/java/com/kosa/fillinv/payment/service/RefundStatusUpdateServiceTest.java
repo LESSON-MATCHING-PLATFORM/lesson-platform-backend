@@ -175,7 +175,7 @@ class RefundStatusUpdateServiceTest {
 
         assertThat(refund.getRefundStatus()).isEqualTo(RefundStatus.FAILURE);
         assertThat(refund.getNextAttemptAt()).isEqualTo(nextAttemptAt);
-        assertThat(refund.getRetryCount()).isEqualTo(1);
+        assertThat(refund.getRetryCount()).isZero();
 
         RefundHistory history = refundHistoryRepository.findByPaymentKey(paymentKey).getFirst();
 
@@ -221,7 +221,7 @@ class RefundStatusUpdateServiceTest {
 
         assertThat(refund.getRefundStatus()).isEqualTo(RefundStatus.UNKNOWN);
         assertThat(refund.getNextAttemptAt()).isEqualTo(nextAttemptAt);
-        assertThat(refund.getRetryCount()).isEqualTo(1);
+        assertThat(refund.getRetryCount()).isZero();
 
         RefundHistory history = refundHistoryRepository.findByPaymentKey(paymentKey).getFirst();
 

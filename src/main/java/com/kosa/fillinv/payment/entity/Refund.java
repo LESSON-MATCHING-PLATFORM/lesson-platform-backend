@@ -115,7 +115,6 @@ public class Refund {
 
             refundStatus = RefundStatus.FAILURE;
             this.nextAttemptAt = nextAttemptAt;
-            this.retryCount++;
             return;
         }
 
@@ -129,7 +128,6 @@ public class Refund {
 
             this.refundStatus = RefundStatus.UNKNOWN;
             this.nextAttemptAt = nextAttemptAt;
-            this.retryCount++;
             return;
         }
 

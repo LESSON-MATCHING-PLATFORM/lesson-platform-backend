@@ -17,7 +17,7 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.PaymentService;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
-import com.kosa.fillinv.schedule.service.ScheduleService;
+import com.kosa.fillinv.schedule.service.ScheduleCommandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,7 +47,7 @@ class PaymentOutboxIntegrationTest {
     private TossPaymentClient tossPaymentClient;
 
     @MockitoBean
-    private ScheduleService scheduleService;
+    private ScheduleCommandService scheduleService;
 
     @Autowired
     private PaymentService paymentService;
