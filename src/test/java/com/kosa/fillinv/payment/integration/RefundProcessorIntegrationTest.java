@@ -7,6 +7,9 @@ import com.kosa.fillinv.payment.domain.RefundExtraDetails;
 import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundHistory;
 import com.kosa.fillinv.payment.entity.RefundStatus;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxEvent;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxRepository;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxStatus;
 import com.kosa.fillinv.payment.repository.RefundHistoryRepository;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.RefundProcessor;
@@ -50,8 +53,12 @@ class RefundProcessorIntegrationTest {
     @Autowired
     private RefundHistoryRepository refundHistoryRepository;
 
+    @Autowired
+    private PaymentOutboxRepository paymentOutboxRepository;
+
     @BeforeEach
     void setUp() {
+        paymentOutboxRepository.deleteAll();
         refundHistoryRepository.deleteAll();
         refundRepository.deleteAll();
     }
@@ -68,6 +75,7 @@ class RefundProcessorIntegrationTest {
 
         Refund savedRefund = refundRepository.findById(refund.getId()).orElseThrow();
         List<RefundHistory> histories = refundHistoryRepository.findByPaymentKey(refund.getPaymentKey());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
 
         assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
         assertThat(savedRefund.getRefundStatus()).isEqualTo(RefundStatus.SUCCESS);
@@ -77,6 +85,14 @@ class RefundProcessorIntegrationTest {
         assertThat(savedRefund.getPspRaw()).isEqualTo("raw");
         assertThat(histories).extracting(RefundHistory::getNewStatus)
                 .containsExactly(RefundStatus.EXECUTING, RefundStatus.SUCCESS);
+        assertThat(outboxEvents).hasSize(1);
+        PaymentOutboxEvent outboxEvent = outboxEvents.getFirst();
+        assertThat(outboxEvent.getStatus()).isEqualTo(PaymentOutboxStatus.READY);
+        assertThat(outboxEvent.getEventType()).isEqualTo("REFUND_COMPLETED");
+        assertThat(outboxEvent.getAggregateId()).isEqualTo(command.refundId());
+        assertThat(outboxEvent.getTopic()).isEqualTo("payment-topic");
+        assertThat(outboxEvent.getPayload()).contains("\"action\":\"REFUND_COMPLETED\"");
+        assertThat(outboxEvent.getPayload()).contains("\"order_id\":\"order-001\"");
     }
 
     @Test
@@ -91,6 +107,7 @@ class RefundProcessorIntegrationTest {
 
         Refund savedRefund = refundRepository.findById(refund.getId()).orElseThrow();
         List<RefundHistory> histories = refundHistoryRepository.findByPaymentKey(refund.getPaymentKey());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
 
         assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
         assertThat(savedRefund.getRefundStatus()).isEqualTo(RefundStatus.UNKNOWN);
@@ -98,6 +115,7 @@ class RefundProcessorIntegrationTest {
         assertThat(savedRefund.getNextAttemptAt()).isNotNull();
         assertThat(histories).extracting(RefundHistory::getNewStatus)
                 .containsExactly(RefundStatus.EXECUTING, RefundStatus.UNKNOWN);
+        assertThat(outboxEvents).isEmpty();
     }
 
     @Test
@@ -116,6 +134,7 @@ class RefundProcessorIntegrationTest {
 
         Refund savedRefund = refundRepository.findById(refund.getId()).orElseThrow();
         List<RefundHistory> histories = refundHistoryRepository.findByPaymentKey(refund.getPaymentKey());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
 
         assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
         assertThat(savedRefund.getRefundStatus()).isEqualTo(RefundStatus.SUCCESS);
@@ -124,6 +143,8 @@ class RefundProcessorIntegrationTest {
                 .containsExactly(RefundStatus.FAILURE, RefundStatus.EXECUTING);
         assertThat(histories).extracting(RefundHistory::getNewStatus)
                 .containsExactly(RefundStatus.EXECUTING, RefundStatus.SUCCESS);
+        assertThat(outboxEvents).hasSize(1);
+        assertThat(outboxEvents.getFirst().getEventType()).isEqualTo("REFUND_COMPLETED");
     }
 
     private Refund refund(String refundId) {

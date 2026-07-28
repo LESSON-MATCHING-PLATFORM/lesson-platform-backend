@@ -7,6 +7,9 @@ import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
 import com.kosa.fillinv.payment.domain.PaymentExtraDetails;
 import com.kosa.fillinv.payment.domain.PaymentMethod;
 import com.kosa.fillinv.payment.domain.PaymentType;
+import com.kosa.fillinv.payment.domain.RefundExecutionResult;
+import com.kosa.fillinv.payment.domain.RefundExtraDetails;
+import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +61,40 @@ class PaymentOutboxServiceTest {
     }
 
     @Test
+    @DisplayName("환불 완료 이벤트를 READY 상태 Outbox 이벤트로 저장한다")
+    void saveRefundCompletedEvent() throws Exception {
+        PGCancelCommand command = refundCommand();
+        RefundExecutionResult result = refundResult(command);
+        String payload = "{\"action\":\"REFUND_COMPLETED\",\"order_id\":\"schedule-001\"}";
+        given(objectMapper.writeValueAsString(any()))
+                .willReturn(payload);
+
+        paymentOutboxService.saveRefundCompletedEvent(command, result);
+
+        PaymentOutboxEvent saved = savedEvent();
+        assertThat(saved.getId()).isNotBlank();
+        assertThat(saved.getEventType()).isEqualTo("REFUND_COMPLETED");
+        assertThat(saved.getAggregateId()).isEqualTo(command.refundId());
+        assertThat(saved.getTopic()).isEqualTo("payment-topic");
+        assertThat(saved.getPayload()).isEqualTo(payload);
+        assertThat(saved.getStatus()).isEqualTo(PaymentOutboxStatus.READY);
+        assertThat(saved.getRetryCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("환불 완료 이벤트 직렬화 실패 시 예외를 던진다")
+    void saveRefundCompletedEvent_whenSerializationFails() throws Exception {
+        PGCancelCommand command = refundCommand();
+        given(objectMapper.writeValueAsString(any()))
+                .willThrow(new JsonProcessingException("boom") {
+                });
+
+        assertThatThrownBy(() -> paymentOutboxService.saveRefundCompletedEvent(command, refundResult(command)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Payment outbox event serialization failed");
+    }
+
+    @Test
     @DisplayName("결제 완료 이벤트 직렬화 실패 시 예외를 던진다")
     void savePaymentCompletedEvent_whenSerializationFails() throws Exception {
         PaymentConfirmCommand command = command();
@@ -80,6 +117,10 @@ class PaymentOutboxServiceTest {
         return new PaymentConfirmCommand("payment-key-001", "schedule-001", 30000);
     }
 
+    private PGCancelCommand refundCommand() {
+        return new PGCancelCommand("refund-001", "payment-key-001", "schedule-001", "단순 변심", 30000);
+    }
+
     private PaymentExecutionResult result(PaymentConfirmCommand command) {
         return new PaymentExecutionResult(
                 command.paymentKey(),
@@ -91,6 +132,20 @@ class PaymentOutboxServiceTest {
                         "자바 멘토링 - 30분",
                         PSPConfirmationStatus.DONE,
                         command.amount().longValue(),
+                        "raw"
+                )
+        );
+    }
+
+    private RefundExecutionResult refundResult(PGCancelCommand command) {
+        return new RefundExecutionResult(
+                command.paymentKey(),
+                command.orderId(),
+                new RefundExtraDetails(
+                        Instant.parse("2026-07-28T00:00:00Z"),
+                        command.amount(),
+                        command.reason(),
+                        "transaction-key-001",
                         "raw"
                 )
         );

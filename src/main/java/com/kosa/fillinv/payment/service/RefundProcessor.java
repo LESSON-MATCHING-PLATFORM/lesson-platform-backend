@@ -6,6 +6,7 @@ import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.PaymentFailure;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.entity.RefundStatus;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
@@ -14,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionException;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.sql.SQLException;
@@ -28,6 +30,8 @@ public class RefundProcessor {
     private final TossPaymentClient tossPaymentClient;
     private final RefundRepository refundRepository;
     private final RefundRetryBackoffPolicy refundRetryBackoffPolicy;
+    private final PaymentOutboxService paymentOutboxService;
+    private final TransactionTemplate transactionTemplate;
 
     public PaymentRefundResult processPGCancel(PGCancelCommand command) {
         refundStatusUpdateService.updateStatusToExecuting(command.refundId(), Instant.now());
@@ -42,12 +46,15 @@ public class RefundProcessor {
                             command.amount()
                     ));
 
-            refundStatusUpdateService.updateStatusToSuccess(
-                    command.refundId(),
-                    result.refundExtraDetails().transactionKey(),
-                    result.refundExtraDetails().refundedAt(),
-                    result.refundExtraDetails().pspRawData()
-            );
+            transactionTemplate.executeWithoutResult(status -> {
+                refundStatusUpdateService.updateStatusToSuccess(
+                        command.refundId(),
+                        result.refundExtraDetails().transactionKey(),
+                        result.refundExtraDetails().refundedAt(),
+                        result.refundExtraDetails().pspRawData()
+                );
+                paymentOutboxService.saveRefundCompletedEvent(command, result);
+            });
 
             return new PaymentRefundResult(RefundStatus.SUCCESS, null);
         } catch (Exception e) {

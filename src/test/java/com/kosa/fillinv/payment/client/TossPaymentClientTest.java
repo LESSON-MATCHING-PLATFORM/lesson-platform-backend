@@ -2,6 +2,7 @@ package com.kosa.fillinv.payment.client;
 
 import com.kosa.fillinv.payment.client.dto.PaymentCancelCommand;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +20,7 @@ class TossPaymentClientTest {
     private TossPaymentClient tossPaymentClient;
 
     @Test // 로컬에서 수동 테스트 용도
+    @Disabled("실제 Toss API 연동 확인용 수동 테스트")
     @DisplayName("결제된 요청을 취소한다.")
     void refund() {
         // given

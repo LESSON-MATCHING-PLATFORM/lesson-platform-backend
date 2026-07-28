@@ -5,10 +5,12 @@ import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.domain.RefundExtraDetails;
 import com.kosa.fillinv.payment.entity.RefundStatus;
+import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
 import jakarta.persistence.PersistenceException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,10 +18,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,13 +46,28 @@ class RefundProcessorTest {
     @Mock
     private RefundRetryBackoffPolicy refundRetryBackoffPolicy;
 
+    @Mock
+    private PaymentOutboxService paymentOutboxService;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     @InjectMocks
     private RefundProcessor refundProcessor;
 
     private final Instant nextAttemptAt = Instant.parse("2026-07-27T00:01:00Z");
 
+    @BeforeEach
+    void setUpTransactionTemplate() {
+        lenient().doAnswer(invocation -> {
+            Consumer<TransactionStatus> callback = invocation.getArgument(0);
+            callback.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+    }
+
     @Test
-    @DisplayName("환불 PG 취소 성공 시 환불을 성공 상태로 변경한다")
+    @DisplayName("환불 PG 취소 성공 시 환불 성공 상태와 완료 이벤트를 저장한다")
     void processPGCancel_whenPgCancelSucceeds() {
         PGCancelCommand command = command();
         when(tossPaymentClient.cancel(any()))
@@ -64,10 +84,11 @@ class RefundProcessorTest {
                 eq(Instant.parse("2026-07-27T00:00:00Z")),
                 eq("raw")
         );
+        verify(paymentOutboxService).saveRefundCompletedEvent(eq(command), any());
     }
 
     @Test
-    @DisplayName("환불 PG 취소가 명확히 실패하면 환불을 실패 상태로 변경한다")
+    @DisplayName("환불 PG 취소가 명확히 실패하면 환불을 실패 상태로 변경하고 완료 이벤트는 저장하지 않는다")
     void processPGCancel_whenPgCancelFails() {
         PGCancelCommand command = command();
         when(tossPaymentClient.cancel(any()))
@@ -82,10 +103,11 @@ class RefundProcessorTest {
         assertThat(result.status()).isEqualTo(RefundStatus.FAILURE);
         verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
         verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), eq(nextAttemptAt));
+        verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
     }
 
     @Test
-    @DisplayName("환불 PG 취소 결과가 불명확하면 환불을 UNKNOWN 상태로 변경한다")
+    @DisplayName("환불 PG 취소 결과가 불명확하면 환불을 UNKNOWN 상태로 변경하고 완료 이벤트는 저장하지 않는다")
     void processPGCancel_whenPgCancelUnknown() {
         PGCancelCommand command = command();
         when(tossPaymentClient.cancel(any()))
@@ -100,6 +122,7 @@ class RefundProcessorTest {
         assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
         verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
         verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
+        verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
     }
 
     @Test
@@ -158,6 +181,7 @@ class RefundProcessorTest {
 
         assertThat(result.status()).isEqualTo(RefundStatus.FAILURE);
         verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), eq(nextAttemptAt));
+        verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
     }
 
     private PGCancelCommand command() {
@@ -177,6 +201,7 @@ class RefundProcessorTest {
 
         assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
         verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
+        verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
     }
 
     private RefundExecutionResult successResult() {
