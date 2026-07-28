@@ -6,6 +6,7 @@ import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.RefundProcessor;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,7 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class RefundRetryScheduler {
 
     private static final int MAX_RETRY_COUNT = 3;
@@ -32,7 +34,15 @@ public class RefundRetryScheduler {
                         MAX_RETRY_COUNT,
                         Instant.now()
                 )
-                .forEach(this::processRefund);
+                .forEach(this::processRefundSafely);
+    }
+
+    private void processRefundSafely(Refund refund) {
+        try {
+            processRefund(refund);
+        } catch (Exception e) {
+            log.error("Refund retry failed. refundId={}", refund.getId(), e);
+        }
     }
 
     private void processRefund(Refund refund) {

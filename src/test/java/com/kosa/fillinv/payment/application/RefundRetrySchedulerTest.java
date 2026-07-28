@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -77,9 +78,37 @@ class RefundRetrySchedulerTest {
         assertThat(command.amount()).isEqualTo(refund.getRefundAmount());
     }
 
+    @Test
+    @DisplayName("한 환불 재처리 실패가 나머지 환불 재처리를 막지 않는다")
+    void retryFailedRefunds_whenOneRefundFails_continuesRemainingRefunds() {
+        Refund first = refund("refund-001");
+        Refund second = refund("refund-002");
+        given(refundRepository.findTop100ByRefundStatusInAndRetryCountLessThanAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+                any(),
+                any(),
+                any()
+        ))
+                .willReturn(List.of(first, second));
+        doThrow(new IllegalStateException("retry failed"))
+                .when(refundProcessor)
+                .processPGCancel(any(PGCancelCommand.class));
+
+        refundRetryScheduler.retryFailedRefunds();
+
+        ArgumentCaptor<PGCancelCommand> captor = ArgumentCaptor.forClass(PGCancelCommand.class);
+        verify(refundProcessor, org.mockito.Mockito.times(2)).processPGCancel(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(PGCancelCommand::refundId)
+                .containsExactly("refund-001", "refund-002");
+    }
+
     private Refund refund() {
+        return refund("refund-001");
+    }
+
+    private Refund refund(String refundId) {
         return Refund.builder()
-                .id("refund-001")
+                .id(refundId)
                 .paymentId("payment-001")
                 .paymentKey("payment-key")
                 .orderId("order-001")

@@ -28,7 +28,7 @@ class TossPaymentClientTest {
         Integer refundAmount = 1000;
 
         // when
-        RefundExecutionResult result =  tossPaymentClient.cancel(new PaymentCancelCommand(paymentKey, orderId, refundReason, refundAmount));
+        RefundExecutionResult result =  tossPaymentClient.cancel(new PaymentCancelCommand("refund-id", paymentKey, orderId, refundReason, refundAmount));
 
         // then
         assertThat(result.paymentKey()).isEqualTo(paymentKey);

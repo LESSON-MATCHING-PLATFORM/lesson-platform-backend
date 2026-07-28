@@ -94,7 +94,7 @@ class TossPaymentClientRetryTest {
     void refund_retryable_error_should_not_retry_inside_client() {
         // given
         PaymentCancelCommand command =
-                new PaymentCancelCommand("paymentKey", "orderId", "단순변심", 1000);
+                new PaymentCancelCommand("refundId", "paymentKey", "orderId", "단순변심", 1000);
 
         // onStatus에서 항상 retryable 예외 발생시키기
         when(responseSpec.onStatus(any(), any()))
@@ -110,6 +110,7 @@ class TossPaymentClientRetryTest {
                 .isInstanceOf(PSPConfirmationException.class);
 
         verify(tossRestClient, times(1)).post();
+        verify(bodySpec).header("Idempotency-Key", command.refundId());
     }
 
 }

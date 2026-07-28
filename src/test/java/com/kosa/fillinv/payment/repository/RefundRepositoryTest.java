@@ -30,8 +30,8 @@ class RefundRepositoryTest {
     @DisplayName("재시도 대상 UNKNOWN과 FAILURE 환불만 조회한다")
     void findRetryableRefunds() {
         Instant now = Instant.parse("2026-07-27T00:00:00Z");
-        Refund unknown = unknownRefund("unknown", 2, now.minusSeconds(1));
-        Refund failure = failureRefund("failure", 2, now.minusSeconds(1));
+        Refund unknown = unknownRefund("unknown", 2, now.minusSeconds(10));
+        Refund failure = failureRefund("failure", 2, now.minusSeconds(5));
         Refund futureUnknown = unknownRefund("future-unknown", 2, now.plusSeconds(1));
         Refund exhaustedUnknown = unknownRefund("exhausted-unknown", 3, now.minusSeconds(1));
         Refund futureFailure = failureRefund("future-failure", 2, now.plusSeconds(1));
@@ -60,7 +60,7 @@ class RefundRepositoryTest {
 
         assertThat(refunds)
                 .extracting(Refund::getId)
-                .containsExactlyInAnyOrder("unknown", "failure");
+                .containsExactly("unknown", "failure");
     }
 
     private Refund unknownRefund(String id, int attemptCount, Instant nextAttemptAt) {

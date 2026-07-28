@@ -31,7 +31,7 @@ public class TossPaymentClient {
                                 uriBuilder
                                         .path(CANCEL_URI)
                                         .build(command.paymentKey()))
-                        .header("Idempotency-Key", command.paymentKey())
+                        .header("Idempotency-Key", command.refundId())
                         .body(new TossPaymentCancelRequest(
                                 command.cancelReason(),
                                 command.refundAmount()

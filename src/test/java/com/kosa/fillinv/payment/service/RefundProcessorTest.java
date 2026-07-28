@@ -8,16 +8,21 @@ import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
+import jakarta.persistence.PersistenceException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -33,8 +38,13 @@ class RefundProcessorTest {
     @Mock
     private RefundRepository refundRepository;
 
+    @Mock
+    private RefundRetryBackoffPolicy refundRetryBackoffPolicy;
+
     @InjectMocks
     private RefundProcessor refundProcessor;
+
+    private final Instant nextAttemptAt = Instant.parse("2026-07-27T00:01:00Z");
 
     @Test
     @DisplayName("환불 PG 취소 성공 시 환불을 성공 상태로 변경한다")
@@ -64,12 +74,14 @@ class RefundProcessorTest {
                 .thenThrow(pspFailure());
         when(refundRepository.getRetryCountByRefundId(command.refundId()))
                 .thenReturn(1);
+        when(refundRetryBackoffPolicy.nextAttemptAt(any(), eq(1)))
+                .thenReturn(nextAttemptAt);
 
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
         assertThat(result.status()).isEqualTo(RefundStatus.FAILURE);
         verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
-        verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), any());
+        verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), eq(nextAttemptAt));
     }
 
     @Test
@@ -80,16 +92,91 @@ class RefundProcessorTest {
                 .thenThrow(pspUnknown());
         when(refundRepository.getRetryCountByRefundId(command.refundId()))
                 .thenReturn(1);
+        when(refundRetryBackoffPolicy.nextAttemptAt(any(), eq(1)))
+                .thenReturn(nextAttemptAt);
 
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
         assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
         verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
-        verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), any());
+        verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
+    }
+
+    @Test
+    @DisplayName("PG 호출 전 EXECUTING 상태 전이 실패는 환불 실패 처리로 분류하지 않는다")
+    void processPGCancel_whenExecutingTransitionFails() {
+        PGCancelCommand command = command();
+        doThrow(new IllegalStateException("invalid transition"))
+                .when(refundStatusUpdateService)
+                .updateStatusToExecuting(eq(command.refundId()), any());
+
+        assertThatThrownBy(() -> refundProcessor.processPGCancel(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("invalid transition");
+
+        verify(tossPaymentClient, never()).cancel(any());
+        verify(refundStatusUpdateService, never()).updateStatusToFailure(any(), any(), any());
+        verify(refundStatusUpdateService, never()).updateStatusToUnknown(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("외부 연결 오류는 UNKNOWN으로 분류하고 nextAttemptAt을 저장한다")
+    void processPGCancel_whenResourceAccessException() {
+        assertUnknownError(new ResourceAccessException("network down"));
+    }
+
+    @Test
+    @DisplayName("Spring DataAccessException은 UNKNOWN으로 분류하고 nextAttemptAt을 저장한다")
+    void processPGCancel_whenDataAccessException() {
+        assertUnknownError(new DataAccessResourceFailureException("db down"));
+    }
+
+    @Test
+    @DisplayName("Spring TransactionException은 UNKNOWN으로 분류하고 nextAttemptAt을 저장한다")
+    void processPGCancel_whenTransactionException() {
+        assertUnknownError(new TransactionSystemException("tx failed"));
+    }
+
+    @Test
+    @DisplayName("JPA PersistenceException은 UNKNOWN으로 분류하고 nextAttemptAt을 저장한다")
+    void processPGCancel_whenPersistenceException() {
+        assertUnknownError(new PersistenceException("jpa failed"));
+    }
+
+    @Test
+    @DisplayName("분류되지 않은 일반 예외는 FAILURE로 분류하고 nextAttemptAt을 저장한다")
+    void processPGCancel_whenUnexpectedException() {
+        PGCancelCommand command = command();
+        when(tossPaymentClient.cancel(any()))
+                .thenThrow(new IllegalStateException("boom"));
+        when(refundRepository.getRetryCountByRefundId(command.refundId()))
+                .thenReturn(2);
+        when(refundRetryBackoffPolicy.nextAttemptAt(any(), eq(2)))
+                .thenReturn(nextAttemptAt);
+
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
+
+        assertThat(result.status()).isEqualTo(RefundStatus.FAILURE);
+        verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), eq(nextAttemptAt));
     }
 
     private PGCancelCommand command() {
         return new PGCancelCommand("refund-001", "payment-key", "order-001", "단순 변심", 1000);
+    }
+
+    private void assertUnknownError(RuntimeException exception) {
+        PGCancelCommand command = command();
+        when(tossPaymentClient.cancel(any()))
+                .thenThrow(exception);
+        when(refundRepository.getRetryCountByRefundId(command.refundId()))
+                .thenReturn(2);
+        when(refundRetryBackoffPolicy.nextAttemptAt(any(), eq(2)))
+                .thenReturn(nextAttemptAt);
+
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
+
+        assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
+        verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
     }
 
     private RefundExecutionResult successResult() {
