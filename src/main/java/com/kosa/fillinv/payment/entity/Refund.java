@@ -81,7 +81,8 @@ public class Refund {
 
     public void markExecuting(Instant lastAttemptedAt) {
         if (refundStatus == RefundStatus.NOT_STARTED ||
-                refundStatus == RefundStatus.UNKNOWN) {
+                refundStatus == RefundStatus.UNKNOWN ||
+                refundStatus == RefundStatus.FAILURE) {
 
             refundStatus = RefundStatus.EXECUTING;
             this.lastAttemptedAt = lastAttemptedAt;
