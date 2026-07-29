@@ -1,7 +1,7 @@
 package com.kosa.fillinv.payment.application;
 
 import com.kosa.fillinv.payment.entity.Refund;
-import com.kosa.fillinv.payment.service.RefundService;
+import com.kosa.fillinv.payment.service.RefundProcessor;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Async;
@@ -13,12 +13,12 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @RequiredArgsConstructor
 public class RefundEventListener {
 
-    private final RefundService refundService;
+    private final RefundProcessor refundProcessor;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleRefundEvent(Refund refund) {
-        refundService.processPGCancel(new PGCancelCommand(
+        refundProcessor.processPGCancel(new PGCancelCommand(
                 refund.getId(),
                 refund.getPaymentKey(),
                 refund.getOrderId(),

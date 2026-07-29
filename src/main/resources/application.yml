@@ -12,3 +12,5 @@ logging:
 payment:
   outbox:
     publish-fixed-delay-ms: 5000
+  refund:
+    retry-fixed-delay-ms: 10000

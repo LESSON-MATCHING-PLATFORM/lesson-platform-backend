@@ -90,11 +90,11 @@ class TossPaymentClientRetryTest {
     }
 
     @Test
-    @DisplayName("TOSS cancel 과정에서 재시도 가능한 실패의 경우 backoff 전략이 실행된다")
-    void refund_retryable_error_should_retry_and_call_post_three_times() {
+    @DisplayName("TOSS cancel은 재시도 가능한 실패여도 단일 요청만 수행한다")
+    void refund_retryable_error_should_not_retry_inside_client() {
         // given
         PaymentCancelCommand command =
-                new PaymentCancelCommand("paymentKey", "orderId", "단순변심", 1000);
+                new PaymentCancelCommand("refundId", "paymentKey", "orderId", "단순변심", 1000);
 
         // onStatus에서 항상 retryable 예외 발생시키기
         when(responseSpec.onStatus(any(), any()))
@@ -109,8 +109,8 @@ class TossPaymentClientRetryTest {
         assertThatThrownBy(() -> tossPaymentClient.cancel(command))
                 .isInstanceOf(PSPConfirmationException.class);
 
-        // 최초 1회 + retry 2회 = 총 3번
-        verify(tossRestClient, times(3)).post();
+        verify(tossRestClient, times(1)).post();
+        verify(bodySpec).header("Idempotency-Key", command.refundId());
     }
 
 }

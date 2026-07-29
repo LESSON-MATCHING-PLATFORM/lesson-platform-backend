@@ -81,7 +81,8 @@ public class Refund {
 
     public void markExecuting(Instant lastAttemptedAt) {
         if (refundStatus == RefundStatus.NOT_STARTED ||
-                refundStatus == RefundStatus.UNKNOWN) {
+                refundStatus == RefundStatus.UNKNOWN ||
+                refundStatus == RefundStatus.FAILURE) {
 
             refundStatus = RefundStatus.EXECUTING;
             this.lastAttemptedAt = lastAttemptedAt;
@@ -115,7 +116,6 @@ public class Refund {
 
             refundStatus = RefundStatus.FAILURE;
             this.nextAttemptAt = nextAttemptAt;
-            this.retryCount++;
             return;
         }
 
@@ -129,7 +129,6 @@ public class Refund {
 
             this.refundStatus = RefundStatus.UNKNOWN;
             this.nextAttemptAt = nextAttemptAt;
-            this.retryCount++;
             return;
         }
 

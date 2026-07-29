@@ -1,27 +1,25 @@
 package com.kosa.fillinv.payment.service.dto;
 
-import com.kosa.fillinv.payment.application.RefundEventListener;
-import com.kosa.fillinv.payment.client.TossPaymentClient;
-import com.kosa.fillinv.payment.domain.PSPConfirmationException;
-import com.kosa.fillinv.payment.domain.RefundExecutionResult;
-import com.kosa.fillinv.payment.domain.RefundExtraDetails;
+import com.kosa.fillinv.global.exception.ResourceException;
 import com.kosa.fillinv.payment.entity.Payment;
+import com.kosa.fillinv.payment.entity.Refund;
+import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.repository.RefundRepository;
-import com.kosa.fillinv.payment.service.RefundStatusUpdateService;
 import com.kosa.fillinv.payment.service.RefundService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest
@@ -29,42 +27,35 @@ import static org.mockito.Mockito.*;
 class RefundServiceTest {
 
     @MockitoBean
-    private RefundStatusUpdateService refundStatusUpdateService;
-
-    @MockitoBean
-    private TossPaymentClient tossPaymentClient;
-
-    @MockitoBean
     private PaymentRepository paymentRepository;
 
     @MockitoBean
-    private ApplicationContext applicationContext;
-
-    @MockitoSpyBean
     private RefundRepository refundRepository;
-
-    @MockitoBean
-    private RefundEventListener refundEventListener;
 
     @Autowired
     private RefundService refundService;
 
     private static PaymentRefundCommand mockCommand() {
         String paymentId = "paymentId";
-        String cancelReason = "orderId";
+        String cancelReason = "단순 변심";
         int refundAmount = 1000;
 
         return new PaymentRefundCommand(paymentId, cancelReason, refundAmount);
     }
 
     private static Payment mockPayment(PaymentRefundCommand command) {
-        return Payment.builder()
+        Payment payment = Payment.builder()
                 .id(command.paymentId())
                 .buyerId("buyerId")
+                .sellerId("sellerId")
                 .orderId("orderId")
                 .orderName("orderName")
                 .amount(1000)
                 .build();
+        payment.markExecuting();
+        payment.markSuccess();
+        payment.setPaymentKey("payment-key");
+        return payment;
     }
 
     @Test
@@ -75,6 +66,10 @@ class RefundServiceTest {
 
         when(paymentRepository.findById(command.paymentId()))
                 .thenReturn(Optional.of(mockPayment(command)));
+        when(refundRepository.existsByPaymentId(command.paymentId()))
+                .thenReturn(false);
+        when(refundRepository.save(any(Refund.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         // when
         RefundDTO refund = refundService.refund(command);
@@ -83,134 +78,116 @@ class RefundServiceTest {
         assertThat(refund.paymentId()).isEqualTo(command.paymentId());
         assertThat(refund.refundReason()).isEqualTo(command.cancelReason());
         assertThat(refund.refundAmount()).isEqualTo(command.refundAmount());
-    }
 
+        var captor = forClass(Refund.class);
+        verify(refundRepository).save(captor.capture());
 
-    @Test
-    @DisplayName("환불 요청에 해당하는 pg cancel을 실행하고 정상적으로 처리된다.")
-    void processPGCancel_whenPaymentCancelRequested_and_pgCancelSuccess() throws InterruptedException {
-        // given
-        PaymentRefundCommand command = mockCommand();
-        when(paymentRepository.findById(command.paymentId()))
-                .thenReturn(Optional.of(mockPayment(command)));
-        RefundDTO refund = refundService.refund(command);
-
-        when(refundRepository.getRetryCountByRefundId(refund.refundId()))
-                .thenReturn(0);
-        when(tossPaymentClient.cancel(any()))
-                .thenReturn(mockSuccessResult());
-        // when
-        refundService.processPGCancel(new PGCancelCommand(
-                refund.refundId(),
-                refund.paymentKey(),
-                refund.orderId(),
-                refund.refundReason(),
-                refund.refundAmount()
-        ));
-
-        // then
-        verify(refundStatusUpdateService).updateStatusToExecuting(eq(refund.refundId()), any());
-        verify(tossPaymentClient).cancel(any());
-        verify(refundStatusUpdateService).updateStatusToSuccess(
-                eq(refund.refundId()),
-                any(),
-                any(),
-                any()
-        );
+        Refund saved = captor.getValue();
+        assertThat(saved.getPaymentId()).isEqualTo(command.paymentId());
+        assertThat(saved.getPaymentKey()).isEqualTo("payment-key");
+        assertThat(saved.getOrderId()).isEqualTo("orderId");
+        assertThat(saved.getRefundStatus()).isEqualTo(RefundStatus.NOT_STARTED);
+        assertThat(saved.getRefundAmount()).isEqualTo(command.refundAmount());
+        assertThat(saved.getRefundReason()).isEqualTo(command.cancelReason());
     }
 
     @Test
-    @DisplayName("환불 요청에 해당하는 pg cancel을 실행하고 실패한다.")
-    void processPGCancel_whenPaymentCancelRequested_and_pgCancelFailed() {
-        // given
+    @DisplayName("존재하지 않는 결제는 환불 요청을 생성할 수 없다")
+    void refund_whenPaymentNotFound() {
         PaymentRefundCommand command = mockCommand();
         when(paymentRepository.findById(command.paymentId()))
-                .thenReturn(Optional.of(mockPayment(command)));
-        RefundDTO refund = refundService.refund(command);
+                .thenReturn(Optional.empty());
 
-        when(refundRepository.getRetryCountByRefundId(refund.refundId()))
-                .thenReturn(0);
-        when(tossPaymentClient.cancel(any()))
-                .thenThrow(mockPSPConfirmationExceptionFail());
-        // when
-        refundService.processPGCancel(new PGCancelCommand(
-                refund.refundId(),
-                refund.paymentKey(),
-                refund.orderId(),
-                refund.refundReason(),
-                refund.refundAmount()
-        ));
+        assertThatThrownBy(() -> refundService.refund(command))
+                .isInstanceOf(ResourceException.NotFound.class)
+                .hasMessageContaining("결제 정보가 존재하지 않습니다.");
 
-        // then
-        verify(refundStatusUpdateService).updateStatusToExecuting(eq(refund.refundId()), any());
-        verify(tossPaymentClient).cancel(any());
-        verify(refundStatusUpdateService).updateStatusToFailure(
-                eq(refund.refundId()),
-                any(),
-                any()
-        );
+        verifyRefundNotCreated();
     }
 
     @Test
-    @DisplayName("환불 요청에 해당하는 pg cancel을 실행하고 결과를 알 수 없음 처리한다.")
-    void processPGCancel_whenPaymentCancelRequested_and_pgCancelUnknown() {
-        // given
+    @DisplayName("성공하지 않은 결제는 환불 요청을 생성할 수 없다")
+    void refund_whenPaymentIsNotSuccess() {
         PaymentRefundCommand command = mockCommand();
-        when(paymentRepository.findById(command.paymentId()))
-                .thenReturn(Optional.of(mockPayment(command)));
-        RefundDTO refund = refundService.refund(command);
-
-        when(refundRepository.getRetryCountByRefundId(refund.refundId()))
-                .thenReturn(0);
-        when(tossPaymentClient.cancel(any()))
-                .thenThrow(mockPSPConfirmationExceptionUnknown());
-        // when
-        refundService.processPGCancel(new PGCancelCommand(
-                refund.refundId(),
-                refund.paymentKey(),
-                refund.orderId(),
-                refund.refundReason(),
-                refund.refundAmount()
-        ));
-
-        // then
-        verify(refundStatusUpdateService).updateStatusToExecuting(eq(refund.refundId()), any());
-        verify(tossPaymentClient).cancel(any());
-        verify(refundStatusUpdateService).updateStatusToUnknown(
-                eq(refund.refundId()),
-                any(),
-                any()
-        );
-    }
-
-    private PSPConfirmationException mockPSPConfirmationExceptionUnknown() {
-        return PSPConfirmationException.builder()
-                .errorCode("400")
-                .errorMessage("알 수 없음")
-                .isSuccess(false)
-                .isFailure(false)
-                .isUnknown(true)
-                .isRetryable(true)
+        Payment payment = Payment.builder()
+                .id(command.paymentId())
+                .buyerId("buyerId")
+                .sellerId("sellerId")
+                .orderId("orderId")
+                .orderName("orderName")
+                .amount(1000)
                 .build();
+        when(paymentRepository.findById(command.paymentId()))
+                .thenReturn(Optional.of(payment));
+
+        assertThatThrownBy(() -> refundService.refund(command))
+                .isInstanceOf(ResourceException.InvalidArgument.class)
+                .hasMessageContaining("성공한 결제만 환불할 수 있습니다.");
+
+        verifyRefundNotCreated();
     }
 
-    private PSPConfirmationException mockPSPConfirmationExceptionFail() {
-        return PSPConfirmationException.builder()
-                .errorCode("400")
-                .errorMessage("실패")
-                .isSuccess(false)
-                .isFailure(true)
-                .isUnknown(false)
-                .isRetryable(false)
-                .build();
+    @Test
+    @DisplayName("환불 사유가 비어 있으면 환불 요청을 생성할 수 없다")
+    void refund_whenCancelReasonIsBlank() {
+        PaymentRefundCommand command = new PaymentRefundCommand("paymentId", " ", 1000);
+        givenPayment(command);
+
+        assertThatThrownBy(() -> refundService.refund(command))
+                .isInstanceOf(ResourceException.InvalidArgument.class)
+                .hasMessageContaining("환불 사유는 필수입니다.");
+
+        verifyRefundNotCreated();
     }
 
-    private RefundExecutionResult mockSuccessResult() {
-        return new RefundExecutionResult(
-                "paymentKey",
-                "orderId",
-                mock(RefundExtraDetails.class)
-        );
+    @Test
+    @DisplayName("환불 금액이 0 이하이면 환불 요청을 생성할 수 없다")
+    void refund_whenRefundAmountIsNotPositive() {
+        PaymentRefundCommand command = new PaymentRefundCommand("paymentId", "단순 변심", 0);
+        givenPayment(command);
+
+        assertThatThrownBy(() -> refundService.refund(command))
+                .isInstanceOf(ResourceException.InvalidArgument.class)
+                .hasMessageContaining("환불 금액은 0보다 커야 합니다.");
+
+        verifyRefundNotCreated();
+    }
+
+    @Test
+    @DisplayName("환불 금액이 결제 금액보다 크면 환불 요청을 생성할 수 없다")
+    void refund_whenRefundAmountExceedsPaymentAmount() {
+        PaymentRefundCommand command = new PaymentRefundCommand("paymentId", "단순 변심", 1001);
+        givenPayment(command);
+
+        assertThatThrownBy(() -> refundService.refund(command))
+                .isInstanceOf(ResourceException.InvalidArgument.class)
+                .hasMessageContaining("환불 금액은 결제 금액보다 클 수 없습니다.");
+
+        verifyRefundNotCreated();
+    }
+
+    @Test
+    @DisplayName("이미 환불 요청이 존재하면 중복 환불 요청을 생성할 수 없다")
+    void refund_whenRefundAlreadyExists() {
+        PaymentRefundCommand command = mockCommand();
+        givenPayment(command);
+        when(refundRepository.existsByPaymentId(command.paymentId()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> refundService.refund(command))
+                .isInstanceOf(ResourceException.InvalidArgument.class)
+                .hasMessageContaining("이미 환불 요청이 존재합니다.");
+
+        verifyRefundNotCreated();
+    }
+
+    private void givenPayment(PaymentRefundCommand command) {
+        when(paymentRepository.findById(command.paymentId()))
+                .thenReturn(Optional.of(mockPayment(command)));
+    }
+
+    private void verifyRefundNotCreated() {
+        verify(refundRepository, never()).save(any());
     }
 
 }

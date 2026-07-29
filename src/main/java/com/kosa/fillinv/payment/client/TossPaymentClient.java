@@ -25,44 +25,25 @@ public class TossPaymentClient {
     private final String CANCEL_URI = "/v1/payments/{paymentKey}/cancel";
 
     public RefundExecutionResult cancel(PaymentCancelCommand command) {
-        int attempt = 0;
+        TossPaymentConfirmationResponse response =
+                tossRestClient.post()
+                        .uri(uriBuilder ->
+                                uriBuilder
+                                        .path(CANCEL_URI)
+                                        .build(command.paymentKey()))
+                        .header("Idempotency-Key", command.refundId())
+                        .body(new TossPaymentCancelRequest(
+                                command.cancelReason(),
+                                command.refundAmount()
+                        ))
+                        .retrieve()
+                        .onStatus(
+                                status -> status.is4xxClientError() || status.is5xxServerError(),
+                                tossErrorHandler()
+                        )
+                        .body(TossPaymentConfirmationResponse.class);
 
-        while (true) {
-            try {
-                TossPaymentConfirmationResponse response =
-                        tossRestClient.post()
-                                .uri(uriBuilder ->
-                                        uriBuilder
-                                                .path(CANCEL_URI)
-                                                .build(command.paymentKey())) // paymentKey를 멱등키로 사용하여 결제 한건당 하나의 취소요청만 처리됨
-                                .header("Idempotency-Key", command.paymentKey())
-                                .body(new TossPaymentCancelRequest(
-                                        command.cancelReason(),
-                                        command.refundAmount()
-                                ))
-                                .retrieve()
-                                .onStatus(
-                                        status -> status.is4xxClientError() || status.is5xxServerError(),
-                                        tossErrorHandler()
-                                )
-                                .body(TossPaymentConfirmationResponse.class);
-
-                return getRefundExecutionResult(response);
-
-            } catch (PSPConfirmationException e) {
-                attempt++;
-                if (!e.isRetryable() || attempt > MAX_RETRY_COUNT) {
-                    throw e;
-                }
-                backoff(attempt);
-            } catch (ResourceAccessException e) { // timeout / network
-                attempt++;
-                if (attempt > MAX_RETRY_COUNT) {
-                    throw e;
-                }
-                backoff(attempt);
-            }
-        }
+        return getRefundExecutionResult(response);
     }
 
     public PaymentExecutionResult confirm(PaymentConfirmCommand command) {

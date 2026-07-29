@@ -83,6 +83,88 @@ class RefundStatusUpdateServiceTest {
     }
 
     @Test
+    @DisplayName("UNKNOWN 환불은 재처리 시 다시 EXECUTING으로 변경하고 retryCount를 증가시킨다.")
+    void updateStatusToExecuting_fromUnknown() {
+        // given
+        String refundId = "refund-001";
+        String paymentKey = "payment-key";
+
+        refundRepository.save(
+                Refund.builder()
+                        .id(refundId)
+                        .paymentId("payment-001")
+                        .paymentKey(paymentKey)
+                        .orderId("order-id")
+                        .refundStatus(RefundStatus.UNKNOWN)
+                        .refundAmount(1000)
+                        .refundReason("refund reason")
+                        .build()
+        );
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        Instant now = Instant.now();
+        refundStatusUpdateService.updateStatusToExecuting(refundId, now);
+        entityManager.flush();
+        entityManager.clear();
+
+        // then
+        Refund refund = refundRepository.findById(refundId)
+                .orElseThrow(() -> new AssertionError("Refund가 저장되지 않았습니다."));
+
+        assertThat(refund.getRefundStatus()).isEqualTo(RefundStatus.EXECUTING);
+        assertThat(refund.getLastAttemptedAt()).isEqualTo(now);
+        assertThat(refund.getRetryCount()).isEqualTo(1);
+
+        RefundHistory history = refundHistoryRepository.findByPaymentKey(paymentKey).getFirst();
+
+        assertThat(history.getPreviousStatus()).isEqualTo(RefundStatus.UNKNOWN);
+        assertThat(history.getNewStatus()).isEqualTo(RefundStatus.EXECUTING);
+    }
+
+    @Test
+    @DisplayName("FAILURE 환불은 재처리 시 다시 EXECUTING으로 변경하고 retryCount를 증가시킨다.")
+    void updateStatusToExecuting_fromFailure() {
+        // given
+        String refundId = "refund-001";
+        String paymentKey = "payment-key";
+
+        refundRepository.save(
+                Refund.builder()
+                        .id(refundId)
+                        .paymentId("payment-001")
+                        .paymentKey(paymentKey)
+                        .orderId("order-id")
+                        .refundStatus(RefundStatus.FAILURE)
+                        .refundAmount(1000)
+                        .refundReason("refund reason")
+                        .build()
+        );
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        Instant now = Instant.now();
+        refundStatusUpdateService.updateStatusToExecuting(refundId, now);
+        entityManager.flush();
+        entityManager.clear();
+
+        // then
+        Refund refund = refundRepository.findById(refundId)
+                .orElseThrow(() -> new AssertionError("Refund가 저장되지 않았습니다."));
+
+        assertThat(refund.getRefundStatus()).isEqualTo(RefundStatus.EXECUTING);
+        assertThat(refund.getLastAttemptedAt()).isEqualTo(now);
+        assertThat(refund.getRetryCount()).isEqualTo(1);
+
+        RefundHistory history = refundHistoryRepository.findByPaymentKey(paymentKey).getFirst();
+
+        assertThat(history.getPreviousStatus()).isEqualTo(RefundStatus.FAILURE);
+        assertThat(history.getNewStatus()).isEqualTo(RefundStatus.EXECUTING);
+    }
+
+    @Test
     @DisplayName("결제 상태를 결제 성공으로 변경한다.")
     void updateStatusToSuccess() {
         // given
@@ -175,7 +257,7 @@ class RefundStatusUpdateServiceTest {
 
         assertThat(refund.getRefundStatus()).isEqualTo(RefundStatus.FAILURE);
         assertThat(refund.getNextAttemptAt()).isEqualTo(nextAttemptAt);
-        assertThat(refund.getRetryCount()).isEqualTo(1);
+        assertThat(refund.getRetryCount()).isZero();
 
         RefundHistory history = refundHistoryRepository.findByPaymentKey(paymentKey).getFirst();
 
@@ -221,7 +303,7 @@ class RefundStatusUpdateServiceTest {
 
         assertThat(refund.getRefundStatus()).isEqualTo(RefundStatus.UNKNOWN);
         assertThat(refund.getNextAttemptAt()).isEqualTo(nextAttemptAt);
-        assertThat(refund.getRetryCount()).isEqualTo(1);
+        assertThat(refund.getRetryCount()).isZero();
 
         RefundHistory history = refundHistoryRepository.findByPaymentKey(paymentKey).getFirst();
 

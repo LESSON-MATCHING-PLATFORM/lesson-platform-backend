@@ -19,7 +19,7 @@ import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.ScheduleService;
+import com.kosa.fillinv.schedule.service.ScheduleCommandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,7 +58,7 @@ class PaymentServiceTest {
     private ScheduleRepository scheduleRepository;
 
     @Mock
-    private ScheduleService scheduleService;
+    private ScheduleCommandService scheduleService;
 
     @Mock
     private PaymentOutboxService paymentOutboxService;

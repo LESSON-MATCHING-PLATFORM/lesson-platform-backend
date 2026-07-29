@@ -36,7 +36,7 @@ public class PaymentService {
     private final TossPaymentClient tossPaymentClient;
     private final PaymentRepository paymentRepository;
     private final ScheduleRepository scheduleRepository;
-    private final ScheduleService scheduleService;
+    private final ScheduleCommandService scheduleService;
     private final PaymentOutboxService paymentOutboxService;
     private final TransactionTemplate transactionTemplate;
 
