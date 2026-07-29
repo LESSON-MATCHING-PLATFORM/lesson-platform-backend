@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kosa.fillinv.payment.domain.PaymentEvent;
 import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
+import com.kosa.fillinv.payment.domain.RefundCompletedEvent;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
@@ -49,12 +50,13 @@ public class PaymentOutboxService {
 
     @Transactional
     public PaymentOutboxEvent saveRefundCompletedEvent(PGCancelCommand command, RefundExecutionResult result) {
-        PaymentEvent event = new PaymentEvent(
-                null,
-                null,
+        RefundCompletedEvent event = new RefundCompletedEvent(
                 REFUND_COMPLETED,
-                String.valueOf(result.refundExtraDetails().refundAmount()),
+                command.refundId(),
+                command.paymentKey(),
                 command.orderId(),
+                String.valueOf(result.refundExtraDetails().refundAmount()),
+                result.refundExtraDetails().transactionKey(),
                 result.refundExtraDetails().refundedAt().toString(),
                 result.refundExtraDetails().refundReason()
         );
@@ -70,7 +72,7 @@ public class PaymentOutboxService {
         return paymentOutboxRepository.save(outboxEvent);
     }
 
-    private String toJson(PaymentEvent event) {
+    private String toJson(Object event) {
         try {
             return objectMapper.writeValueAsString(event);
         } catch (JsonProcessingException e) {

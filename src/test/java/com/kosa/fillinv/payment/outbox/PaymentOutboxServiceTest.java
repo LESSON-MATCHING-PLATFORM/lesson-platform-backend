@@ -7,6 +7,7 @@ import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
 import com.kosa.fillinv.payment.domain.PaymentExtraDetails;
 import com.kosa.fillinv.payment.domain.PaymentMethod;
 import com.kosa.fillinv.payment.domain.PaymentType;
+import com.kosa.fillinv.payment.domain.RefundCompletedEvent;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.domain.RefundExtraDetails;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
@@ -79,6 +80,16 @@ class PaymentOutboxServiceTest {
         assertThat(saved.getPayload()).isEqualTo(payload);
         assertThat(saved.getStatus()).isEqualTo(PaymentOutboxStatus.READY);
         assertThat(saved.getRetryCount()).isZero();
+
+        RefundCompletedEvent event = serializedRefundCompletedEvent();
+        assertThat(event.action()).isEqualTo("REFUND_COMPLETED");
+        assertThat(event.refundId()).isEqualTo(command.refundId());
+        assertThat(event.paymentKey()).isEqualTo(command.paymentKey());
+        assertThat(event.orderId()).isEqualTo(command.orderId());
+        assertThat(event.amount()).isEqualTo(String.valueOf(command.amount()));
+        assertThat(event.transactionKey()).isEqualTo(result.refundExtraDetails().transactionKey());
+        assertThat(event.refundedAt()).isEqualTo(result.refundExtraDetails().refundedAt().toString());
+        assertThat(event.reason()).isEqualTo(command.reason());
     }
 
     @Test
@@ -110,6 +121,12 @@ class PaymentOutboxServiceTest {
     private PaymentOutboxEvent savedEvent() {
         ArgumentCaptor<PaymentOutboxEvent> captor = ArgumentCaptor.forClass(PaymentOutboxEvent.class);
         verify(paymentOutboxRepository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    private RefundCompletedEvent serializedRefundCompletedEvent() throws JsonProcessingException {
+        ArgumentCaptor<RefundCompletedEvent> captor = ArgumentCaptor.forClass(RefundCompletedEvent.class);
+        verify(objectMapper).writeValueAsString(captor.capture());
         return captor.getValue();
     }
 
