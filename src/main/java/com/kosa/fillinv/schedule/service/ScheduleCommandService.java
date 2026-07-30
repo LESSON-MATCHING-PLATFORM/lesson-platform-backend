@@ -10,6 +10,7 @@ import com.kosa.fillinv.lesson.entity.Option;
 import com.kosa.fillinv.lesson.repository.AvailableTimeRepository;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.schedule.dto.request.ScheduleCreateRequest;
+import com.kosa.fillinv.schedule.entity.BookingCancelReason;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.entity.ScheduleTime;
@@ -95,8 +96,23 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        schedule.updateStatus(ScheduleStatus.CANCELED);
-        bookingStockService.restore(schedule);
+        cancelWithStockRestore(schedule, BookingCancelReason.MENTOR_REJECTED);
+    }
+
+    @Transactional
+    public void cancelByRefund(String scheduleId) {
+        Schedule schedule = validator.getSchedule(scheduleId);
+
+        if (schedule.getStatus() == ScheduleStatus.CANCELED) {
+            return;
+        }
+
+        if (schedule.getStatus() != ScheduleStatus.APPROVAL_PENDING &&
+                schedule.getStatus() != ScheduleStatus.APPROVED) {
+            throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
+        }
+
+        cancelWithStockRestore(schedule, BookingCancelReason.REFUND_COMPLETED);
     }
 
     // 해당 레슨 수강이 모두 끝난 경우 (승인 -> 완료)
@@ -113,6 +129,13 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
         }
 
         schedule.updateStatus(ScheduleStatus.COMPLETED);
+    }
+
+    private void cancelWithStockRestore(Schedule schedule, BookingCancelReason reason) {
+        boolean canceled = schedule.cancel(reason);
+        if (canceled) {
+            bookingStockService.restore(schedule);
+        }
     }
 
     // ------- Private Method - 내부 보조 메서드 (비즈니스 로직)

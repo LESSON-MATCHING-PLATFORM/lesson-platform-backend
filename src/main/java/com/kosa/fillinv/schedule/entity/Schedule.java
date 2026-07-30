@@ -12,6 +12,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.Instant;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -86,6 +87,13 @@ public class Schedule extends BaseEntity {
     @Column(name = "available_time_id")
     private String availableTimeId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancel_reason")
+    private BookingCancelReason cancelReason;
+
+    @Column(name = "canceled_at")
+    private Instant canceledAt;
+
     // STUDY 레슨은 여러 scheduleTime을 가질 수 있기 때문에 List 사용
     @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL)
     private List<ScheduleTime> scheduleTimeList = new ArrayList<>();
@@ -102,6 +110,17 @@ public class Schedule extends BaseEntity {
     // 스케쥴 상태 변경 메서드
     public void updateStatus(ScheduleStatus scheduleStatus) {
         this.status = scheduleStatus;
+    }
+
+    public boolean cancel(BookingCancelReason reason) {
+        if (status == ScheduleStatus.CANCELED) {
+            return false;
+        }
+
+        this.status = ScheduleStatus.CANCELED;
+        this.cancelReason = reason;
+        this.canceledAt = Instant.now();
+        return true;
     }
 
     public void markPaymentCompleted() {
