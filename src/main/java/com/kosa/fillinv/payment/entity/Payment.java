@@ -76,21 +76,32 @@ public class Payment extends BaseEntity {
     }
 
     public void markExecuting() {
-        if (paymentStatus == PaymentStatus.NOT_STARTED || paymentStatus == PaymentStatus.UNKNOWN) {
+        if (paymentStatus == PaymentStatus.NOT_STARTED ||
+                paymentStatus == PaymentStatus.FAILURE ||
+                paymentStatus == PaymentStatus.UNKNOWN) {
             paymentStatus = PaymentStatus.EXECUTING;
+            return;
         }
+
+        throw new IllegalStateException("EXECUTING 상태로 변경할 수 없습니다. 현재 상태: " + paymentStatus);
     }
 
     public void markSuccess() {
         if (paymentStatus == PaymentStatus.EXECUTING || paymentStatus == PaymentStatus.UNKNOWN) {
             paymentStatus = PaymentStatus.SUCCESS;
+            return;
         }
+
+        throw new IllegalStateException("SUCCESS 상태로 변경할 수 없습니다. 현재 상태: " + paymentStatus);
     }
 
     public void markFail() {
         if (paymentStatus == PaymentStatus.NOT_STARTED || paymentStatus == PaymentStatus.EXECUTING || paymentStatus == PaymentStatus.UNKNOWN) {
             paymentStatus = PaymentStatus.FAILURE;
+            return;
         }
+
+        throw new IllegalStateException("FAILURE 상태로 변경할 수 없습니다. 현재 상태: " + paymentStatus);
     }
 
     // 실제 운영 시에는 전체 raw 데이터를 저장 필수. 테스트를 위해서 길이 제한
@@ -101,6 +112,9 @@ public class Payment extends BaseEntity {
     public void markUnknown() {
         if (paymentStatus == PaymentStatus.NOT_STARTED || paymentStatus == PaymentStatus.EXECUTING) {
             paymentStatus = PaymentStatus.UNKNOWN;
+            return;
         }
+
+        throw new IllegalStateException("UNKNOWN 상태로 변경할 수 없습니다. 현재 상태: " + paymentStatus);
     }
 }

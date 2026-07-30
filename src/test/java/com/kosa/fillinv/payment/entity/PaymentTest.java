@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PaymentTest {
 
@@ -72,17 +73,46 @@ class PaymentTest {
     }
 
     @Test
-    @DisplayName("SUCCESS 결제는 실패나 불명확 상태로 되돌아가지 않는다")
-    void success_isTerminalForFailureAndUnknownTransitions() {
+    @DisplayName("FAILURE 결제는 다시 EXECUTING 후 SUCCESS로 확정될 수 있다")
+    void failure_canBeRetriedAndConfirmed() {
+        Payment payment = payment();
+        payment.markExecuting();
+        payment.markFail();
+
+        payment.markExecuting();
+        payment.markSuccess();
+
+        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+    }
+
+    @Test
+    @DisplayName("SUCCESS 결제는 다른 상태로 전이할 수 없다")
+    void success_isTerminal() {
         Payment payment = payment();
         payment.markExecuting();
         payment.markSuccess();
 
-        payment.markFail();
-        payment.markUnknown();
-        payment.markExecuting();
+        assertThatThrownBy(payment::markFail)
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(payment::markUnknown)
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(payment::markExecuting)
+                .isInstanceOf(IllegalStateException.class);
 
         assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+    }
+
+    @Test
+    @DisplayName("FAILURE 결제는 SUCCESS로 바로 전이할 수 없다")
+    void failure_cannotBecomeSuccessWithoutExecuting() {
+        Payment payment = payment();
+        payment.markExecuting();
+        payment.markFail();
+
+        assertThatThrownBy(payment::markSuccess)
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.FAILURE);
     }
 
     private Payment payment() {

@@ -164,6 +164,72 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("FAILURE 결제 confirm 재시도는 Toss를 다시 호출하고 성공 후처리를 수행한다")
+    void confirm_whenPaymentFailure_retriesTossConfirmAndCompletesPayment() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(failurePayment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(result.failure()).isNull();
+
+        verify(tossPaymentClient).confirm(command);
+        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+                command.paymentKey(),
+                command.orderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+                command.paymentKey(),
+                command.orderId(),
+                PaymentStatus.SUCCESS,
+                successResult(command).paymentExtraDetails(),
+                null
+        ));
+        verify(scheduleService).completePayment(command.orderId());
+        verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
+    }
+
+    @Test
+    @DisplayName("UNKNOWN 결제 confirm 재시도는 Toss를 다시 호출하고 성공 후처리를 수행한다")
+    void confirm_whenPaymentUnknown_retriesTossConfirmAndCompletesPayment() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(unknownPayment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(result.failure()).isNull();
+
+        verify(tossPaymentClient).confirm(command);
+        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+                command.paymentKey(),
+                command.orderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+                command.paymentKey(),
+                command.orderId(),
+                PaymentStatus.SUCCESS,
+                successResult(command).paymentExtraDetails(),
+                null
+        ));
+        verify(scheduleService).completePayment(command.orderId());
+        verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
+    }
+
+    @Test
     @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 스케줄은 변경하지 않는다")
     void confirm_failure_updatesPaymentFailureOnly() {
         PaymentConfirmCommand command = confirmCommand();
@@ -245,6 +311,20 @@ class PaymentServiceTest {
         Payment payment = payment();
         payment.markExecuting();
         payment.markSuccess();
+        return payment;
+    }
+
+    private Payment failurePayment() {
+        Payment payment = payment();
+        payment.markExecuting();
+        payment.markFail();
+        return payment;
+    }
+
+    private Payment unknownPayment() {
+        Payment payment = payment();
+        payment.markExecuting();
+        payment.markUnknown();
         return payment;
     }
 

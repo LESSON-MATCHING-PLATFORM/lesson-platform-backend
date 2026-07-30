@@ -20,11 +20,11 @@ public class PaymentUpdateService {
     private final PaymentRepository paymentRepository;
     private final PaymentHistoryRepository paymentHistoryRepository;
 
-    private static PaymentHistory createPaymentHistory(Payment payment, PaymentStatus newStatus, String reason) {
+    private static PaymentHistory createPaymentHistory(Payment payment, PaymentStatus previousStatus, PaymentStatus newStatus, String reason) {
         return PaymentHistory.builder()
                 .id(UUID.randomUUID().toString())
                 .paymentId(payment.getId())
-                .previousStatus(payment.getPaymentStatus())
+                .previousStatus(previousStatus)
                 .newStatus(newStatus)
                 .reason(reason)
                 .build();
@@ -35,11 +35,13 @@ public class PaymentUpdateService {
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
 
-        PaymentHistory paymentHistory = createPaymentHistory(payment, PaymentStatus.EXECUTING, "PAYMENT_CONFIRMATION_START");
-        paymentHistoryRepository.save(paymentHistory);
+        PaymentStatus previousStatus = payment.getPaymentStatus();
 
         payment.markExecuting();
         payment.setPaymentKey(command.paymentKey());
+
+        PaymentHistory paymentHistory = createPaymentHistory(payment, previousStatus, PaymentStatus.EXECUTING, "PAYMENT_CONFIRMATION_START");
+        paymentHistoryRepository.save(paymentHistory);
     }
 
     @Transactional
@@ -47,13 +49,16 @@ public class PaymentUpdateService {
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
 
-        PaymentHistory paymentHistory = createPaymentHistory(payment, PaymentStatus.SUCCESS, "PAYMENT_CONFIRM_DONE");
-        paymentHistoryRepository.save(paymentHistory);
+        PaymentStatus previousStatus = payment.getPaymentStatus();
+
         payment.markSuccess();
 
         payment.setApprovedAt(command.extraDetails().approvedAt());
         payment.setPaymentMethod(command.extraDetails().method());
         payment.setPspRaw(command.extraDetails().pspRawData());
+
+        PaymentHistory paymentHistory = createPaymentHistory(payment, previousStatus, PaymentStatus.SUCCESS, "PAYMENT_CONFIRM_DONE");
+        paymentHistoryRepository.save(paymentHistory);
     }
 
     @Transactional
@@ -61,10 +66,12 @@ public class PaymentUpdateService {
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
 
-        PaymentHistory paymentHistory = createPaymentHistory(payment, PaymentStatus.FAILURE, command.failure()==null? null : command.failure().toString());
-        paymentHistoryRepository.save(paymentHistory);
+        PaymentStatus previousStatus = payment.getPaymentStatus();
 
         payment.markFail();
+
+        PaymentHistory paymentHistory = createPaymentHistory(payment, previousStatus, PaymentStatus.FAILURE, command.failure()==null? null : command.failure().toString());
+        paymentHistoryRepository.save(paymentHistory);
     }
 
     @Transactional
@@ -82,9 +89,11 @@ public class PaymentUpdateService {
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
 
-        PaymentHistory paymentHistory = createPaymentHistory(payment, PaymentStatus.UNKNOWN, command.failure()==null? null : command.failure().toString());
-        paymentHistoryRepository.save(paymentHistory);
+        PaymentStatus previousStatus = payment.getPaymentStatus();
 
         payment.markUnknown();
+
+        PaymentHistory paymentHistory = createPaymentHistory(payment, previousStatus, PaymentStatus.UNKNOWN, command.failure()==null? null : command.failure().toString());
+        paymentHistoryRepository.save(paymentHistory);
     }
 }
