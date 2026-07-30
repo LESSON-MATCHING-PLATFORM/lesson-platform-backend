@@ -6,12 +6,14 @@ import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.exception.ScheduleException;
 import com.kosa.fillinv.stock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BookingStockService {
 
     private final StockRepository stockRepository;
@@ -21,7 +23,14 @@ public class BookingStockService {
     }
 
     public void restore(Schedule booking) {
-        stockKey(booking).ifPresent(stockRepository::increaseQuantity);
+        stockKey(booking).ifPresent(key -> {
+            if (stockRepository.increaseQuantity(key) == 0) {
+                log.warn("Booking stock restore skipped because stock row was not found. bookingId={}, lessonType={}, stockKey={}",
+                        booking.getId(),
+                        booking.getLessonType(),
+                        key);
+            }
+        });
     }
 
     private Optional<String> stockKey(Schedule booking) {
