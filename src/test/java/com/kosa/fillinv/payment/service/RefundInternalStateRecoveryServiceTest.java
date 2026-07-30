@@ -1,0 +1,99 @@
+package com.kosa.fillinv.payment.service;
+
+import com.kosa.fillinv.payment.entity.Refund;
+import com.kosa.fillinv.payment.entity.RefundStatus;
+import com.kosa.fillinv.payment.repository.RefundRepository;
+import com.kosa.fillinv.schedule.entity.ScheduleStatus;
+import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+
+@ExtendWith(MockitoExtension.class)
+class RefundInternalStateRecoveryServiceTest {
+
+    @Mock
+    private RefundRepository refundRepository;
+
+    @Mock
+    private ScheduleCommandService scheduleCommandService;
+
+    @InjectMocks
+    private RefundInternalStateRecoveryService refundInternalStateRecoveryService;
+
+    @Test
+    @DisplayName("Refund SUCCESS이고 Schedule이 취소 가능 상태인 항목을 조회한다")
+    void recoverRefundInternalStates_queriesSuccessfulRefundsWithCancelableSchedules() {
+        given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
+                .willReturn(List.of());
+
+        refundInternalStateRecoveryService.recoverRefundInternalStates();
+
+        verify(refundRepository).findRefundsPendingInternalStateRecovery(
+                eq(RefundStatus.SUCCESS),
+                eq(List.of(ScheduleStatus.APPROVAL_PENDING, ScheduleStatus.APPROVED)),
+                any(Pageable.class)
+        );
+    }
+
+    @Test
+    @DisplayName("조회된 환불의 orderId로 Booking 환불 취소를 재처리한다")
+    void recoverRefundInternalStates_cancelsBookingsByRefund() {
+        Refund refund = refund("refund-001", "schedule-001");
+        given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
+                .willReturn(List.of(refund));
+
+        refundInternalStateRecoveryService.recoverRefundInternalStates();
+
+        verify(scheduleCommandService).cancelByRefund("schedule-001");
+    }
+
+    @Test
+    @DisplayName("한 항목의 재처리 실패가 나머지 항목 처리를 막지 않는다")
+    void recoverRefundInternalStates_whenOneRecoveryFails_continuesRemainingRecoveries() {
+        Refund first = refund("refund-001", "schedule-001");
+        Refund second = refund("refund-002", "schedule-002");
+        given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
+                .willReturn(List.of(first, second));
+        doThrow(new IllegalStateException("cancel failed"))
+                .when(scheduleCommandService)
+                .cancelByRefund("schedule-001");
+
+        refundInternalStateRecoveryService.recoverRefundInternalStates();
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(scheduleCommandService, times(2)).cancelByRefund(captor.capture());
+        assertThat(captor.getAllValues())
+                .containsExactly("schedule-001", "schedule-002");
+    }
+
+    private Refund refund(String refundId, String orderId) {
+        Refund refund = Refund.builder()
+                .id(refundId)
+                .paymentId("payment-" + refundId)
+                .paymentKey("payment-key-" + refundId)
+                .orderId(orderId)
+                .refundStatus(RefundStatus.NOT_STARTED)
+                .refundAmount(1000)
+                .refundReason("단순 변심")
+                .build();
+        refund.markExecuting(java.time.Instant.parse("2026-07-31T00:00:00Z"));
+        refund.markSuccess("transaction-" + refundId, java.time.Instant.parse("2026-07-31T00:00:01Z"), "raw");
+        return refund;
+    }
+}

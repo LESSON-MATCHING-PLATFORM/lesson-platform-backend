@@ -2,6 +2,8 @@ package com.kosa.fillinv.payment.repository;
 
 import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
+import com.kosa.fillinv.schedule.entity.ScheduleStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -23,5 +25,19 @@ public interface RefundRepository extends JpaRepository<Refund, String> {
             Collection<RefundStatus> refundStatuses,
             Integer retryCount,
             Instant now
+    );
+
+    @Query("""
+            select r
+            from Refund r, Schedule s
+            where r.orderId = s.id
+              and r.refundStatus = :refundStatus
+              and s.status in :scheduleStatuses
+            order by r.refundedAt asc, r.id asc
+            """)
+    List<Refund> findRefundsPendingInternalStateRecovery(
+            @Param("refundStatus") RefundStatus refundStatus,
+            @Param("scheduleStatuses") Collection<ScheduleStatus> scheduleStatuses,
+            Pageable pageable
     );
 }
