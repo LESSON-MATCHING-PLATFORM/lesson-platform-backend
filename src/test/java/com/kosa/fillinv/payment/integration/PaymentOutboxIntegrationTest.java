@@ -98,6 +98,33 @@ class PaymentOutboxIntegrationTest {
         assertThat(outboxEvent.getPayload()).contains("\"action\":\"PAYMENT_COMPLETED\"");
     }
 
+    @Test
+    @DisplayName("FAILURE 결제 재시도 성공 시 Payment SUCCESS와 이력이 실제 DB에 저장된다")
+    void confirmFailureRetrySuccess_savesPaymentSuccessAndHistories() {
+        Payment payment = paymentRepository.save(failurePayment());
+        PaymentConfirmCommand command = confirmCommand("payment-key-retry");
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        Payment savedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
+        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(savedPayment.getPaymentKey()).isEqualTo(command.paymentKey());
+
+        assertThat(histories).extracting(PaymentHistory::getPreviousStatus)
+                .containsExactly(PaymentStatus.FAILURE, PaymentStatus.EXECUTING);
+        assertThat(histories).extracting(PaymentHistory::getNewStatus)
+                .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.SUCCESS);
+
+        assertThat(outboxEvents).hasSize(1);
+        assertThat(outboxEvents.getFirst().getEventType()).isEqualTo("PAYMENT_COMPLETED");
+    }
+
     private Payment payment() {
         return Payment.builder()
                 .id("payment-001")
@@ -109,8 +136,19 @@ class PaymentOutboxIntegrationTest {
                 .build();
     }
 
+    private Payment failurePayment() {
+        Payment payment = payment();
+        payment.markExecuting();
+        payment.markFail();
+        return payment;
+    }
+
     private PaymentConfirmCommand confirmCommand() {
-        return new PaymentConfirmCommand("payment-key-001", "schedule-001", 30000);
+        return confirmCommand("payment-key-001");
+    }
+
+    private PaymentConfirmCommand confirmCommand(String paymentKey) {
+        return new PaymentConfirmCommand(paymentKey, "schedule-001", 30000);
     }
 
     private PaymentExecutionResult successResult(PaymentConfirmCommand command) {

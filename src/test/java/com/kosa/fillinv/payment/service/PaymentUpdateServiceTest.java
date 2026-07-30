@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -136,6 +137,85 @@ class PaymentUpdateServiceTest {
     }
 
     @Test
+    @DisplayName("FAILURE 결제는 EXECUTING으로 재시도할 수 있고 이력을 남긴다")
+    void updateStatus_failureToExecuting() {
+        Payment payment = failurePayment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+
+        paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
+                "payment-key-retry",
+                payment.getOrderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+
+        PaymentHistory history = savedHistory();
+        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.EXECUTING);
+        assertThat(payment.getPaymentKey()).isEqualTo("payment-key-retry");
+        assertThat(history.getPreviousStatus()).isEqualTo(PaymentStatus.FAILURE);
+        assertThat(history.getNewStatus()).isEqualTo(PaymentStatus.EXECUTING);
+    }
+
+    @Test
+    @DisplayName("금지 전이 시 이력을 저장하지 않아 실제 상태와 이력이 불일치하지 않는다")
+    void updateStatus_invalidTransitionDoesNotSaveHistory() {
+        Payment payment = successPayment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+
+        assertThatThrownBy(() -> paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
+                "payment-key-001",
+                payment.getOrderId(),
+                PaymentStatus.FAILURE,
+                null,
+                new PaymentFailure("INVALID", "invalid")
+        ))).isInstanceOf(IllegalStateException.class);
+
+        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(paymentHistoryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("SUCCESS에서 EXECUTING 금지 전이 시 이력을 저장하지 않는다")
+    void updateStatus_successToExecutingDoesNotSaveHistory() {
+        Payment payment = successPayment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+
+        assertThatThrownBy(() -> paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
+                "payment-key-retry",
+                payment.getOrderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ))).isInstanceOf(IllegalStateException.class);
+
+        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(paymentHistoryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("FAILURE에서 UNKNOWN 금지 전이 시 이력을 저장하지 않는다")
+    void updateStatus_failureToUnknownDoesNotSaveHistory() {
+        Payment payment = failurePayment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+
+        assertThatThrownBy(() -> paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
+                "payment-key-001",
+                payment.getOrderId(),
+                PaymentStatus.UNKNOWN,
+                null,
+                new PaymentFailure("ResourceAccessException", "timeout")
+        ))).isInstanceOf(IllegalStateException.class);
+
+        assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.FAILURE);
+        verify(paymentHistoryRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("없는 orderId로 상태 변경 시 예외가 발생한다")
     void updateStatus_whenPaymentNotFound() {
         given(paymentRepository.findByOrderId("missing-order"))
@@ -159,6 +239,18 @@ class PaymentUpdateServiceTest {
     private Payment executingPayment() {
         Payment payment = payment();
         payment.markExecuting();
+        return payment;
+    }
+
+    private Payment failurePayment() {
+        Payment payment = executingPayment();
+        payment.markFail();
+        return payment;
+    }
+
+    private Payment successPayment() {
+        Payment payment = executingPayment();
+        payment.markSuccess();
         return payment;
     }
 
