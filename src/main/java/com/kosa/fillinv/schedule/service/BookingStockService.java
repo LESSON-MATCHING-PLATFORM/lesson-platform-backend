@@ -1,0 +1,42 @@
+package com.kosa.fillinv.schedule.service;
+
+import com.kosa.fillinv.global.response.ErrorCode;
+import com.kosa.fillinv.lesson.entity.LessonType;
+import com.kosa.fillinv.schedule.entity.Schedule;
+import com.kosa.fillinv.schedule.exception.ScheduleException;
+import com.kosa.fillinv.stock.repository.StockRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class BookingStockService {
+
+    private final StockRepository stockRepository;
+
+    public void reserve(Schedule booking) {
+        stockKey(booking).ifPresent(this::decrease);
+    }
+
+    public void restore(Schedule booking) {
+        stockKey(booking).ifPresent(stockRepository::increaseQuantity);
+    }
+
+    private Optional<String> stockKey(Schedule booking) {
+        LessonType type = LessonType.from(booking.getLessonType());
+
+        return switch (type) {
+            case MENTORING -> Optional.empty();
+            case ONEDAY -> Optional.of(booking.getAvailableTimeId());
+            case STUDY -> Optional.of(booking.getLessonId());
+        };
+    }
+
+    private void decrease(String key) {
+        if (stockRepository.decreaseQuantity(key) == 0) {
+            throw new ScheduleException(ErrorCode.NO_SEAT);
+        }
+    }
+}
