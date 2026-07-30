@@ -15,6 +15,12 @@ import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.RefundProcessor;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
+import com.kosa.fillinv.schedule.entity.BookingCancelReason;
+import com.kosa.fillinv.schedule.entity.Schedule;
+import com.kosa.fillinv.schedule.entity.ScheduleStatus;
+import com.kosa.fillinv.schedule.repository.ScheduleRepository;
+import com.kosa.fillinv.stock.entity.Stock;
+import com.kosa.fillinv.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -56,11 +62,19 @@ class RefundProcessorIntegrationTest {
     @Autowired
     private PaymentOutboxRepository paymentOutboxRepository;
 
+    @Autowired
+    private ScheduleRepository scheduleRepository;
+
+    @Autowired
+    private StockRepository stockRepository;
+
     @BeforeEach
     void setUp() {
         paymentOutboxRepository.deleteAll();
         refundHistoryRepository.deleteAll();
         refundRepository.deleteAll();
+        scheduleRepository.deleteAll();
+        stockRepository.deleteAll();
     }
 
     @Test
@@ -147,15 +161,143 @@ class RefundProcessorIntegrationTest {
         assertThat(outboxEvents.getFirst().getEventType()).isEqualTo("REFUND_COMPLETED");
     }
 
+    @Test
+    @DisplayName("ONEDAY 환불 PG 취소 성공 시 Booking이 취소되고 availableTimeId 기준 재고가 실제 복구된다")
+    void processPGCancel_success_cancelsOnedayBookingAndRestoresStock() {
+        Refund refund = refundRepository.save(refund("refund-001", "schedule-001"));
+        Schedule schedule = schedule(
+                refund.getOrderId(),
+                "ONEDAY",
+                ScheduleStatus.APPROVAL_PENDING,
+                "lesson-001",
+                "available-time-001"
+        );
+        scheduleRepository.save(schedule);
+        stockRepository.save(stock("stock-001", "available-time-001", 3));
+
+        PGCancelCommand command = command(refund);
+        given(tossPaymentClient.cancel(any()))
+                .willReturn(successResult(command));
+
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
+
+        Schedule savedSchedule = scheduleRepository.findById(schedule.getId()).orElseThrow();
+        Stock savedStock = stockRepository.findById("stock-001").orElseThrow();
+
+        assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
+        assertThat(savedSchedule.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+        assertThat(savedSchedule.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
+        assertThat(savedSchedule.getCanceledAt()).isNotNull();
+        assertThat(savedStock.getQuantity()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("STUDY 환불 PG 취소 성공 시 Booking이 취소되고 lessonId 기준 재고가 실제 복구된다")
+    void processPGCancel_success_cancelsStudyBookingAndRestoresStockByLessonId() {
+        Refund refund = refundRepository.save(refund("refund-001", "schedule-001"));
+        Schedule schedule = schedule(
+                refund.getOrderId(),
+                "STUDY",
+                ScheduleStatus.APPROVED,
+                "lesson-001",
+                null
+        );
+        scheduleRepository.save(schedule);
+        stockRepository.save(stock("stock-001", "lesson-001", 7));
+
+        PGCancelCommand command = command(refund);
+        given(tossPaymentClient.cancel(any()))
+                .willReturn(successResult(command));
+
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
+
+        Schedule savedSchedule = scheduleRepository.findById(schedule.getId()).orElseThrow();
+        Stock savedStock = stockRepository.findById("stock-001").orElseThrow();
+
+        assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
+        assertThat(savedSchedule.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+        assertThat(savedSchedule.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
+        assertThat(savedSchedule.getCanceledAt()).isNotNull();
+        assertThat(savedStock.getQuantity()).isEqualTo(8);
+    }
+
+    @Test
+    @DisplayName("이미 CANCELED인 Booking은 환불 PG 취소 성공 후에도 재고를 다시 복구하지 않는다")
+    void processPGCancel_success_whenBookingAlreadyCanceled_doesNotRestoreStockAgain() {
+        Refund refund = refundRepository.save(refund("refund-001", "schedule-001"));
+        Schedule schedule = schedule(
+                refund.getOrderId(),
+                "ONEDAY",
+                ScheduleStatus.APPROVAL_PENDING,
+                "lesson-001",
+                "available-time-001"
+        );
+        schedule.cancel(BookingCancelReason.REFUND_COMPLETED);
+        scheduleRepository.save(schedule);
+        stockRepository.save(stock("stock-001", "available-time-001", 3));
+
+        PGCancelCommand command = command(refund);
+        given(tossPaymentClient.cancel(any()))
+                .willReturn(successResult(command));
+
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
+
+        Schedule savedSchedule = scheduleRepository.findById(schedule.getId()).orElseThrow();
+        Stock savedStock = stockRepository.findById("stock-001").orElseThrow();
+
+        assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
+        assertThat(savedSchedule.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+        assertThat(savedSchedule.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
+        assertThat(savedStock.getQuantity()).isEqualTo(3);
+    }
+
     private Refund refund(String refundId) {
+        return refund(refundId, "order-001");
+    }
+
+    private Refund refund(String refundId, String orderId) {
         return Refund.builder()
                 .id(refundId)
                 .paymentId("payment-001")
                 .paymentKey("payment-key-001")
-                .orderId("order-001")
+                .orderId(orderId)
                 .refundStatus(RefundStatus.NOT_STARTED)
                 .refundAmount(1000)
                 .refundReason("단순 변심")
+                .build();
+    }
+
+    private Schedule schedule(
+            String scheduleId,
+            String lessonType,
+            ScheduleStatus status,
+            String lessonId,
+            String availableTimeId
+    ) {
+        return Schedule.builder()
+                .id(scheduleId)
+                .status(status)
+                .requestContent("신청합니다")
+                .lessonTitle("자바 레슨")
+                .lessonType(lessonType)
+                .lessonDescription("자바를 공부합니다")
+                .lessonLocation("온라인")
+                .lessonCategoryName("개발")
+                .mentorNickname("멘토")
+                .price(10000)
+                .lessonId(lessonId)
+                .menteeId("mentee-001")
+                .mentorId("mentor-001")
+                .optionId("option-001")
+                .availableTimeId(availableTimeId)
+                .build();
+    }
+
+    private Stock stock(String stockId, String serviceKey, int quantity) {
+        return Stock.builder()
+                .id(stockId)
+                .serviceKey(serviceKey)
+                .quantity(quantity)
                 .build();
     }
 
