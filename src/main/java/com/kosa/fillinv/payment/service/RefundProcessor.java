@@ -10,8 +10,10 @@ import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
+import com.kosa.fillinv.schedule.service.ScheduleCommandService;
 import jakarta.persistence.PersistenceException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionException;
@@ -24,6 +26,7 @@ import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RefundProcessor {
 
     private final RefundStatusUpdateService refundStatusUpdateService;
@@ -32,6 +35,7 @@ public class RefundProcessor {
     private final RefundRetryBackoffPolicy refundRetryBackoffPolicy;
     private final PaymentOutboxService paymentOutboxService;
     private final TransactionTemplate transactionTemplate;
+    private final ScheduleCommandService scheduleCommandService;
 
     public PaymentRefundResult processPGCancel(PGCancelCommand command) {
         refundStatusUpdateService.updateStatusToExecuting(command.refundId(), Instant.now());
@@ -56,9 +60,19 @@ public class RefundProcessor {
                 paymentOutboxService.saveRefundCompletedEvent(command, result);
             });
 
+            cancelBookingAfterRefund(command.orderId());
+
             return new PaymentRefundResult(RefundStatus.SUCCESS, null);
         } catch (Exception e) {
             return handlePGCancelError(command.refundId(), e);
+        }
+    }
+
+    private void cancelBookingAfterRefund(String orderId) {
+        try {
+            scheduleCommandService.cancelByRefund(orderId);
+        } catch (Exception e) {
+            log.error("Refund succeeded, but booking cancellation failed. orderId={}", orderId, e);
         }
     }
 

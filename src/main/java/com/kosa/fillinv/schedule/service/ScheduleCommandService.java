@@ -10,10 +10,10 @@ import com.kosa.fillinv.lesson.entity.Option;
 import com.kosa.fillinv.lesson.repository.AvailableTimeRepository;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.schedule.dto.request.ScheduleCreateRequest;
+import com.kosa.fillinv.schedule.entity.BookingCancelReason;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.entity.ScheduleTime;
-import com.kosa.fillinv.schedule.exception.ScheduleException;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import com.kosa.fillinv.stock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,8 +32,8 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
 
     private final ScheduleValidator validator;
     private final ScheduleRepository scheduleRepository;
-    private final StockRepository stockRepository;
     private final AvailableTimeRepository availableTimeRepository;
+    private final BookingStockService bookingStockService;
 
     // ------- Public API - 외부 호출 핵심 메서드
     public String createSchedule(String memberId, ScheduleCreateRequest request) { // 스케쥴 생성
@@ -49,11 +48,7 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
 
         Schedule saved = scheduleRepository.save(schedule);
 
-        if (lesson.getLessonType() == LessonType.ONEDAY) {
-            decreaseStock(saved.getAvailableTimeId());
-        } else if (lesson.getLessonType() == LessonType.STUDY) {
-            decreaseStock(saved.getLessonId());
-        }
+        bookingStockService.reserve(saved);
 
         scheduleRepository.save(schedule);
         return schedule.getId();
@@ -101,14 +96,23 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        schedule.updateStatus(ScheduleStatus.CANCELED);
+        cancelWithStockRestore(schedule, BookingCancelReason.MENTOR_REJECTED);
+    }
 
-        LessonType type = LessonType.from(schedule.getLessonType());
-        switch (type) {
-            case MENTORING -> stockRepository.increaseQuantity(schedule.getOptionId());
-            case ONEDAY -> stockRepository.increaseQuantity(schedule.getAvailableTimeId());
-            case STUDY -> stockRepository.increaseQuantity(schedule.getId());
+    @Transactional
+    public void cancelByRefund(String scheduleId) {
+        Schedule schedule = validator.getSchedule(scheduleId);
+
+        if (schedule.getStatus() == ScheduleStatus.CANCELED) {
+            return;
         }
+
+        if (schedule.getStatus() != ScheduleStatus.APPROVAL_PENDING &&
+                schedule.getStatus() != ScheduleStatus.APPROVED) {
+            throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
+        }
+
+        cancelWithStockRestore(schedule, BookingCancelReason.REFUND_COMPLETED);
     }
 
     // 해당 레슨 수강이 모두 끝난 경우 (승인 -> 완료)
@@ -127,10 +131,10 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
         schedule.updateStatus(ScheduleStatus.COMPLETED);
     }
 
-
-    private void decreaseStock(String key) {
-        if (stockRepository.decreaseQuantity(key) == 0) {
-            throw new ScheduleException(ErrorCode.NO_SEAT);
+    private void cancelWithStockRestore(Schedule schedule, BookingCancelReason reason) {
+        boolean canceled = schedule.cancel(reason);
+        if (canceled) {
+            bookingStockService.restore(schedule);
         }
     }
 
