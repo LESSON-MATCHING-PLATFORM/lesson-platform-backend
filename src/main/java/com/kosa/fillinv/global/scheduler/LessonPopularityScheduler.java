@@ -32,7 +32,7 @@ public class LessonPopularityScheduler {
     private static final double REVIEW_COUNT_WEIGHT = 0.2;
     private static final double BAYESIAN_AVG_WEIGHT = 0.2;
     private final LessonRepository lessonRepository;
-    private final BookingRepository scheduleRepository;
+    private final BookingRepository bookingRepository;
     private final ReviewRepository reviewRepository;
     private final LessonTempRepository lessonTempRepository;
     private final LessonBulkRepository lessonBulkRepository;
@@ -72,7 +72,7 @@ public class LessonPopularityScheduler {
         Instant startDate = Instant.now().minus(7, ChronoUnit.DAYS);
 
         // 최근 7일 신청 조회
-        Map<String, Long> recentStatsMap = scheduleRepository.countByLessonIdAndCreatedAtAfter(startDate).stream()
+        Map<String, Long> recentStatsMap = bookingRepository.countByLessonIdAndCreatedAtAfter(startDate).stream()
                 .collect(Collectors.toMap(
                         row -> (String) row[0],
                         row -> (Long) row[1]));

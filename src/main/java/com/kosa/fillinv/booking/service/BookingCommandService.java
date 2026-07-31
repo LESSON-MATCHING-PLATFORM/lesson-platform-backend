@@ -56,7 +56,7 @@ public class BookingCommandService {
     public void completePayment(String bookingId) {
         Booking booking = bookingReader.getBooking(bookingId);
 
-        // 결제 대기 상태인 스케쥴만 승인 대기로 상태 변경 가능
+        // 결제 대기 상태인 Booking만 승인 대기로 상태 변경 가능
         if (booking.getStatus() != BookingStatus.PAYMENT_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
@@ -69,10 +69,10 @@ public class BookingCommandService {
     public void approveLessonByMentor(String memberId, String bookingId) {
         Booking booking = bookingReader.getBooking(bookingId);
 
-        // 대기중인 스케줄 승인은 멘토만 가능
+        // 대기 중인 Booking 승인은 멘토만 가능
         booking.validateMentor(memberId);
 
-        // 승인 대기 상태인 스케쥴만 승인으로 상태 변경 가능
+        // 승인 대기 상태인 Booking만 승인으로 상태 변경 가능
         if (booking.getStatus() != BookingStatus.APPROVAL_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
@@ -86,10 +86,10 @@ public class BookingCommandService {
     public void rejectLessonByMentor(String memberId, String bookingId) {
         Booking booking = bookingReader.getBooking(bookingId);
 
-        // 스케쥴 취소는 스케쥴 멘토만 가능
+        // Booking 취소는 해당 Booking의 멘토만 가능
         booking.validateMentor(memberId);
 
-        // 승인 대기 상태인 스케쥴만 취소로 상태 변경 가능
+        // 승인 대기 상태인 Booking만 취소로 상태 변경 가능
         if (booking.getStatus() != BookingStatus.APPROVAL_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
@@ -118,10 +118,10 @@ public class BookingCommandService {
     public void completeLesson(String memberId, String bookingId) {
         Booking booking = bookingReader.getBooking(bookingId);
 
-        // 스케쥴 완료는 멘티만 가능
+        // Booking 완료는 멘티만 가능
         booking.validateMentee(memberId);
 
-        // 승인 상태인 스케쥴만 완료로 상태 변경 가능
+        // 승인 상태인 Booking만 완료로 상태 변경 가능
         if (booking.getStatus() != BookingStatus.APPROVED) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }

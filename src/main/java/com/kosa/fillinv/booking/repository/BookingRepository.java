@@ -20,10 +20,10 @@ import java.util.List;
 public interface BookingRepository extends JpaRepository<Booking, String> {
 
 
-    // 레슨별 스케쥴 목록 조회
+    // 레슨별 Booking 목록 조회
     Page<Booking> findByLessonId(String lessonId, Pageable pageable);
 
-    // 상태 일치 스케쥴 찾기
+    // 상태 일치 Booking 찾기
     Page<Booking> findByStatus(BookingStatus status, Pageable pageable);
 
     @Query("SELECT new com.kosa.fillinv.review.dto.UnwrittenReviewVO(s.id, s.lessonTitle, s.lessonId, s.optionName, s.createdAt, m.nickname) " +
@@ -35,16 +35,16 @@ public interface BookingRepository extends JpaRepository<Booking, String> {
             "AND NOT EXISTS (SELECT r FROM Review r WHERE r.scheduleId = s.id)")
     Page<UnwrittenReviewVO> findUnwrittenReviews(@Param("menteeId") String menteeId, Pageable pageable);
 
-    // 멘티 스케쥴 조회 (Batch Fetch Size가 N+1 문제를 알아서 최적화)
+    // 멘티 Booking 조회 (Batch Fetch Size가 N+1 문제를 알아서 최적화)
     Page<Booking> findByMenteeId(String memberId, Pageable pageable);
 
-    // 멘토 스케쥴 조회 (Batch Fetch Size가 N+1 문제를 알아서 최적화)
+    // 멘토 Booking 조회 (Batch Fetch Size가 N+1 문제를 알아서 최적화)
     Page<Booking> findByMentorId(String memberId, Pageable pageable);
 
-    // 멤버(멘토 또는 멘티) 관련 스케쥴을 필터링하여 조회 (시작 시간으로 오름차순 정렬)
+    // 멤버(멘토 또는 멘티) 관련 Booking을 필터링하여 조회 (시작 시간으로 오름차순 정렬)
     @Query("SELECT s FROM Booking s " +
             "LEFT JOIN s.sessions st " +
-            "WHERE (s.mentorId = :memberId OR s.menteeId = :memberId) " + // 스케쥴의 멘토나 멘티가 로그인한 사람의 경우를 찾기
+            "WHERE (s.mentorId = :memberId OR s.menteeId = :memberId) " + // Booking의 멘토나 멘티가 로그인한 사람의 경우를 찾기
             "AND (:title IS NULL OR s.lessonTitle LIKE %:title%) " + // 제목 필터
             "AND (:start IS NULL OR st.startTime >= :start) " + // 시작 지점 조건
             "AND (:end IS NULL OR st.startTime < :end) " + // 종료 지점 조건

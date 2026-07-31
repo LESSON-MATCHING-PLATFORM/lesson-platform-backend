@@ -3,7 +3,7 @@ package com.kosa.fillinv.booking.dto.request;
 import java.time.Instant;
 
 public record BookingCreateRequest(
-        // 스케쥴 생성 (요청)
+        // Booking 생성 (요청)
         String lessonId,
         String optionId, // Option에서 minutes 가져옴
         String availableTimeId,

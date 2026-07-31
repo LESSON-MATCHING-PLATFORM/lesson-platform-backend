@@ -108,9 +108,9 @@ public class Booking extends BaseEntity {
         sessions.forEach(this::addSession);
     }
 
-    // 스케쥴 상태 변경 메서드
-    public void updateStatus(BookingStatus scheduleStatus) {
-        this.status = scheduleStatus;
+    // Booking 상태 변경 메서드
+    public void updateStatus(BookingStatus bookingStatus) {
+        this.status = bookingStatus;
     }
 
     public boolean cancel(BookingCancelReason reason) {
@@ -131,19 +131,19 @@ public class Booking extends BaseEntity {
 
     public void validateMentor(String mentorId) {
         if (mentorId == null || !mentorId.equals(this.mentorId)) {
-            throw new ResourceException.AccessDenied("스케쥴에 참여하는 멘토만 접근가능합니다.");
+            throw new ResourceException.AccessDenied("Booking에 참여하는 멘토만 접근가능합니다.");
         }
     }
 
     public void validateParticipant(String memberId) {
         if (memberId == null || (!memberId.equals(this.menteeId) && !memberId.equals(this.mentorId))) {
-            throw new ResourceException.AccessDenied("스케쥴에 참여하는 멘토 또는 멘티만 접근가능합니다.");
+            throw new ResourceException.AccessDenied("Booking에 참여하는 멘토 또는 멘티만 접근가능합니다.");
         }
     }
 
     public void validateMentee(String memberId) {
         if (memberId == null || !memberId.equals(this.menteeId)) {
-            throw new ResourceException.AccessDenied("스케쥴에 참여하는 멘티만 접근가능합니다.");
+            throw new ResourceException.AccessDenied("Booking에 참여하는 멘티만 접근가능합니다.");
         }
     }
 

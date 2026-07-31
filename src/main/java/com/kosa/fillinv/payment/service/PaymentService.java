@@ -41,7 +41,7 @@ public class PaymentService {
     private final TransactionTemplate transactionTemplate;
 
     /*
-     * 스케쥴에 대한 Payment 객체를 생성 및 데이터베이스에 저장
+     * Booking에 대한 Payment 객체를 생성 및 데이터베이스에 저장
      * Payment 객체를 통해서 이후 결제 과정에서 상태를 관리
      * */
     @Transactional
@@ -59,9 +59,9 @@ public class PaymentService {
             );
         }
 
-        // 결제할 스케쥴 정보 조회
+        // 결제할 Booking 정보 조회
         Booking booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new ResourceException.NotFound("스케쥴을 찾을 수 없습니다. bookingId: " + bookingId));
+                .orElseThrow(() -> new ResourceException.NotFound("Booking을 찾을 수 없습니다. bookingId: " + bookingId));
 
         Integer amount = booking.getPrice();
         String orderName = booking.getLessonTitle() + (booking.getOptionName() != null ? " - " + booking.getOptionName() : "");
@@ -96,7 +96,7 @@ public class PaymentService {
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
             completePaymentSuccess(command, result);
-            completeSchedulePayment(command.orderId());
+            completeBookingPayment(command.orderId());
 
             return new PaymentConfirmResult(
                     PaymentStatus.SUCCESS,
@@ -181,7 +181,7 @@ public class PaymentService {
         });
     }
 
-    private void completeSchedulePayment(String orderId) {
+    private void completeBookingPayment(String orderId) {
         try {
             bookingCommandService.completePayment(orderId);
         } catch (Exception e) {
