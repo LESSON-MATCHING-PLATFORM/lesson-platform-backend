@@ -1,5 +1,7 @@
 package com.kosa.fillinv.schedule.controller;
 
+import com.kosa.fillinv.calendar.service.CalendarScheduleReadService;
+import com.kosa.fillinv.calendar.service.dto.CalendarScheduleSearchCondition;
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.global.response.SuccessResponse;
@@ -10,8 +12,6 @@ import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleListResponse;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.service.ScheduleCommandService;
-import com.kosa.fillinv.schedule.service.ScheduleReadService;
-import com.kosa.fillinv.schedule.service.dto.ScheduleSearchCondition;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -35,7 +35,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 public class ScheduleController {
 
     private final ScheduleCommandService scheduleCommandService;
-    private final ScheduleReadService scheduleReadService;
+    private final CalendarScheduleReadService calendarScheduleReadService;
 
     // 스케쥴 생성
     @PostMapping
@@ -70,7 +70,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        ScheduleDetailResponse response = scheduleReadService.getScheduleDetail(memberId, scheduleId, scheduleTimeId);
+        ScheduleDetailResponse response = calendarScheduleReadService.getScheduleDetail(memberId, scheduleId, scheduleTimeId);
 
         return ResponseEntity
                 .ok(SuccessResponse.success(HttpStatus.OK, response));
@@ -88,9 +88,9 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleReadService.searchUpcomingSchedules(
+        Page<ScheduleListResponse> responses = calendarScheduleReadService.searchUpcomingSchedules(
                 memberId,
-                ScheduleSearchCondition.builder()
+                CalendarScheduleSearchCondition.builder()
                         .from(from)
                         .keyword(keyword)
                         .status(status)
@@ -114,9 +114,9 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleReadService.searchPastSchedules(
+        Page<ScheduleListResponse> responses = calendarScheduleReadService.searchPastSchedules(
                 memberId,
-                ScheduleSearchCondition.builder()
+                CalendarScheduleSearchCondition.builder()
                         .to(to)
                         .keyword(keyword)
                         .status(status)
@@ -139,7 +139,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleReadService.calendar(
+        Page<ScheduleListResponse> responses = calendarScheduleReadService.calendar(
                 memberId,
                 start,
                 end,
@@ -155,11 +155,11 @@ public class ScheduleController {
     @GetMapping("/search")
     public ResponseEntity<SuccessResponse<Page<ScheduleListResponse>>> searchSchedules(
             @AuthenticationPrincipal CustomMemberDetails customMemberDetails, // 로그인한 사용자 ID
-            @ModelAttribute ScheduleSearchCondition condition
+            @ModelAttribute CalendarScheduleSearchCondition condition
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = scheduleReadService.search(condition.withMemberId(memberId));
+        Page<ScheduleListResponse> responses = calendarScheduleReadService.search(condition.withMemberId(memberId));
 
         return ResponseEntity
                 .ok(SuccessResponse.success(HttpStatus.OK, responses));

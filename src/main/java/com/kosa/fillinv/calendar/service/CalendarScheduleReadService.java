@@ -1,5 +1,8 @@
-package com.kosa.fillinv.schedule.service;
+package com.kosa.fillinv.calendar.service;
 
+import com.kosa.fillinv.calendar.repository.CalendarScheduleSpecifications;
+import com.kosa.fillinv.calendar.service.dto.CalendarScheduleSearchCondition;
+import com.kosa.fillinv.calendar.service.dto.CalendarScheduleSortType;
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.member.dto.profile.ProfileResponseDto;
@@ -10,9 +13,7 @@ import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleTime;
 import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
 import com.kosa.fillinv.schedule.repository.ScheduleTimeRepository;
-import com.kosa.fillinv.schedule.repository.ScheduleTimeSpecifications;
-import com.kosa.fillinv.schedule.service.dto.ScheduleSearchCondition;
-import com.kosa.fillinv.schedule.service.dto.ScheduleSortType;
+import com.kosa.fillinv.schedule.service.ScheduleValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,81 +30,73 @@ import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
-public class ScheduleReadService {
+public class CalendarScheduleReadService {
 
     private final ScheduleTimeRepository scheduleTimeRepository;
     private final MemberService memberService;
     private final ScheduleValidator validator;
 
-    // 스케쥴 상세 조회
-    public ScheduleDetailResponse getScheduleDetail(String memberId, String scheduleId, String scheduleTimeId) {
-        Schedule schedule = validator.getSchedule(scheduleId);
+    public ScheduleDetailResponse getScheduleDetail(String memberId, String bookingId, String scheduleTimeId) {
+        Schedule booking = validator.getSchedule(bookingId);
         ScheduleTime scheduleTime = validator.getScheduleTime(scheduleTimeId);
 
-        // 스케쥴과 스케쥴 타임이 연결되어 있는지 확인
-        if (!scheduleTime.getSchedule().getId().equals(scheduleId)) {
+        if (!scheduleTime.getSchedule().getId().equals(bookingId)) {
             throw new BusinessException(ErrorCode.SCHEDULE_TIME_MISMATCH);
         }
 
-        String mentorNickname = schedule.getMentorNickname();
-        String menteeNickname = validator.getNickname(schedule.getMenteeId());
+        String mentorNickname = booking.getMentorNickname();
+        String menteeNickname = validator.getNickname(booking.getMenteeId());
 
-        // entity -> dto 변환
-        // 사용자가 선택한 시간을 보여줘야 하므로 startTime 파라미터 추가
         return ScheduleDetailResponse.from(
-                schedule,
+                booking,
                 mentorNickname,
                 menteeNickname,
                 scheduleTime,
-                schedule.getRole(memberId)
+                booking.getRole(memberId)
         );
     }
 
-    // 멤버가 멘티 또는 멘토인 과거 스케줄 검색
-    public Page<ScheduleListResponse> searchPastSchedules(String memberId, ScheduleSearchCondition condition) {
-        ScheduleSearchCondition past = condition
+    public Page<ScheduleListResponse> searchPastSchedules(String memberId, CalendarScheduleSearchCondition condition) {
+        CalendarScheduleSearchCondition past = condition
                 .participate(memberId)
                 .toPast(condition.to());
 
         return search(past);
     }
 
-    // 멤버가 멘티 또는 멘토인 예정 스케줄 검색
-    public Page<ScheduleListResponse> searchUpcomingSchedules(String memberId, ScheduleSearchCondition condition) {
-        ScheduleSearchCondition intended = condition
+    public Page<ScheduleListResponse> searchUpcomingSchedules(String memberId, CalendarScheduleSearchCondition condition) {
+        CalendarScheduleSearchCondition intended = condition
                 .participate(memberId)
                 .toIntended(condition.from());
 
         return search(intended);
     }
 
-    // 해당 기간에 포함되는 일정 조회
     public Page<ScheduleListResponse> calendar(String memberId, Instant start, Instant end, Integer page, Integer size) {
-        ScheduleSearchCondition condition = ScheduleSearchCondition.defaultCondition()
+        CalendarScheduleSearchCondition condition = CalendarScheduleSearchCondition.defaultCondition()
                 .participate(memberId)
                 .between(start, end)
-                .withSortType(ScheduleSortType.START_TIME_ASC)
+                .withSortType(CalendarScheduleSortType.START_TIME_ASC)
                 .withPage(page)
                 .withSize(size);
 
         return search(condition);
     }
 
-    public Page<ScheduleListResponse> search(ScheduleSearchCondition condition) {
-
+    public Page<ScheduleListResponse> search(CalendarScheduleSearchCondition condition) {
         Sort sort = condition.sortType().toSort();
         PageRequest pageRequest =
                 PageRequest.of(condition.page(), condition.size(), sort);
 
         Specification<ScheduleTime> spec =
-                ScheduleTimeSpecifications.search(
+                CalendarScheduleSpecifications.search(
                         condition.keyword(),
                         condition.from(),
                         condition.to(),
                         condition.status(),
                         condition.participantRole() == ScheduleParticipantRole.MENTOR || condition.participantRole() == ScheduleParticipantRole.BOTH
                                 ? condition.memberId() : null,
-                        condition.participantRole() == ScheduleParticipantRole.MENTEE  || condition.participantRole() == ScheduleParticipantRole.BOTH
+                        condition.participantRole() == ScheduleParticipantRole.MENTEE || condition.participantRole() == ScheduleParticipantRole.BOTH
                                 ? condition.memberId() : null,
                         condition.participantRole()
                 );
@@ -114,13 +107,13 @@ public class ScheduleReadService {
     }
 
     public Page<ScheduleListResponse> convert(String memberId, Page<ScheduleTime> page) {
-        Set<Schedule> schedule = page.getContent().stream()
+        Set<Schedule> bookings = page.getContent().stream()
                 .map(ScheduleTime::getSchedule)
                 .collect(Collectors.toSet());
 
         Set<String> memberIds =
-                schedule.stream()
-                        .flatMap(s -> Stream.of(s.getMentorId(), s.getMenteeId()))
+                bookings.stream()
+                        .flatMap(booking -> Stream.of(booking.getMentorId(), booking.getMenteeId()))
                         .filter(Objects::nonNull)
                         .collect(Collectors.toSet());
 
@@ -128,17 +121,17 @@ public class ScheduleReadService {
 
         return page.map(
                 scheduleTime -> {
-                    Schedule s = scheduleTime.getSchedule();
-                    ProfileResponseDto mentor = members.get(s.getMentorId());
-                    ProfileResponseDto mentee = members.get(s.getMenteeId());
+                    Schedule booking = scheduleTime.getSchedule();
+                    ProfileResponseDto mentor = members.get(booking.getMentorId());
+                    ProfileResponseDto mentee = members.get(booking.getMenteeId());
 
                     return ScheduleListResponse.from(
-                            s,
+                            booking,
                             mentor.nickname(),
                             mentee.nickname(),
                             scheduleTime,
-                            s.getRole(memberId)
-                            );
+                            booking.getRole(memberId)
+                    );
                 }
         );
     }

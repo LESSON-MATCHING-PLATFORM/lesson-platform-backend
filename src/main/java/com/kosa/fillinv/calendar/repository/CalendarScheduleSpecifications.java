@@ -1,8 +1,9 @@
-package com.kosa.fillinv.schedule.repository;
+package com.kosa.fillinv.calendar.repository;
 
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.entity.ScheduleTime;
+import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
@@ -12,7 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ScheduleTimeSpecifications {
+public class CalendarScheduleSpecifications {
 
     public static Specification<ScheduleTime> search(
             String keyword,
@@ -24,11 +25,11 @@ public class ScheduleTimeSpecifications {
             ScheduleParticipantRole role
     ) {
         return Specification
-                .where(fetchSchedule())
+                .where(fetchBooking())
                 .and(lessonTitleContains(keyword))
                 .and(startTimeAfter(from))
                 .and(startTimeBefore(to))
-                .and(scheduleStatusEq(status))
+                .and(bookingStatusEq(status))
                 .and(participantEq(mentorId, menteeId, role));
     }
 
@@ -42,18 +43,18 @@ public class ScheduleTimeSpecifications {
                 to == null ? null : cb.lessThanOrEqualTo(root.get("startTime"), to);
     }
 
-    public static Specification<ScheduleTime> scheduleStatusEq(ScheduleStatus status) {
+    public static Specification<ScheduleTime> bookingStatusEq(ScheduleStatus status) {
         return (root, query, cb) -> {
             if (status == null) return null;
 
-            Join<ScheduleTime, Schedule> schedule =
+            Join<ScheduleTime, Schedule> booking =
                     root.join("schedule", JoinType.INNER);
 
-            return cb.equal(schedule.get("status"), status);
+            return cb.equal(booking.get("status"), status);
         };
     }
 
-    public static Specification<ScheduleTime> fetchSchedule() {
+    public static Specification<ScheduleTime> fetchBooking() {
         return (root, query, cb) -> {
             if (query.getResultType() != Long.class) {
                 root.fetch("schedule", JoinType.INNER);
@@ -74,7 +75,7 @@ public class ScheduleTimeSpecifications {
                 return null;
             }
 
-            Join<ScheduleTime, Schedule> schedule =
+            Join<ScheduleTime, Schedule> booking =
                     root.join("schedule", JoinType.INNER);
 
             return switch (role) {
@@ -83,24 +84,24 @@ public class ScheduleTimeSpecifications {
                     if (mentorId == null) {
                         throw new IllegalArgumentException("MENTOR role requires mentorId");
                     }
-                    yield cb.equal(schedule.get("mentorId"), mentorId);
+                    yield cb.equal(booking.get("mentorId"), mentorId);
                 }
 
                 case MENTEE -> {
                     if (menteeId == null) {
                         throw new IllegalArgumentException("MENTEE role requires menteeId");
                     }
-                    yield cb.equal(schedule.get("menteeId"), menteeId);
+                    yield cb.equal(booking.get("menteeId"), menteeId);
                 }
 
                 case BOTH -> {
                     List<Predicate> predicates = new ArrayList<>();
 
                     if (mentorId != null) {
-                        predicates.add(cb.equal(schedule.get("mentorId"), mentorId));
+                        predicates.add(cb.equal(booking.get("mentorId"), mentorId));
                     }
                     if (menteeId != null) {
-                        predicates.add(cb.equal(schedule.get("menteeId"), menteeId));
+                        predicates.add(cb.equal(booking.get("menteeId"), menteeId));
                     }
 
                     if (predicates.isEmpty()) {
@@ -119,14 +120,13 @@ public class ScheduleTimeSpecifications {
                 return null;
             }
 
-            Join<ScheduleTime, Schedule> schedule =
+            Join<ScheduleTime, Schedule> booking =
                     root.join("schedule", JoinType.INNER);
 
             return cb.like(
-                    cb.lower(schedule.get("lessonTitle")),
+                    cb.lower(booking.get("lessonTitle")),
                     "%" + keyword.toLowerCase() + "%"
             );
         };
     }
-
 }
