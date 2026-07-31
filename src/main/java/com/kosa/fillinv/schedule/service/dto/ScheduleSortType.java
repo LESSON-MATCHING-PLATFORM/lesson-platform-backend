@@ -26,7 +26,7 @@ public enum ScheduleSortType {
         try {
             return ScheduleSortType.valueOf(value.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT, e);
         }
     }
 

@@ -8,4 +8,8 @@ public class BusinessException extends CustomGlobalException {
     public BusinessException(ErrorCode errorCode) {
         super(errorCode);
     }
+
+    public BusinessException(ErrorCode errorCode, Throwable cause) {
+        super(errorCode, cause);
+    }
 }

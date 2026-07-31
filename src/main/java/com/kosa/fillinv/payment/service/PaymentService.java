@@ -1,6 +1,8 @@
 package com.kosa.fillinv.payment.service;
 
 import com.kosa.fillinv.global.exception.ResourceException;
+import com.kosa.fillinv.global.exception.BusinessException;
+import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
@@ -15,6 +17,7 @@ import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
 import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.booking.repository.BookingRepository;
 import com.kosa.fillinv.booking.service.BookingCommandService;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +52,11 @@ public class PaymentService {
 
         String bookingId = command.scheduleId();
 
+        // 결제할 Booking 정보 조회
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceException.NotFound("Booking을 찾을 수 없습니다. bookingId: " + bookingId));
+        validateCheckoutReady(booking);
+
         Payment existingPayment = paymentRepository.findByOrderId(bookingId)
                 .orElse(null);
         if (existingPayment != null) {
@@ -58,10 +66,6 @@ public class PaymentService {
                     existingPayment.getAmount()
             );
         }
-
-        // 결제할 Booking 정보 조회
-        Booking booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new ResourceException.NotFound("Booking을 찾을 수 없습니다. bookingId: " + bookingId));
 
         Integer amount = booking.getPrice();
         String orderName = booking.getLessonTitle() + (booking.getOptionName() != null ? " - " + booking.getOptionName() : "");
@@ -88,6 +92,7 @@ public class PaymentService {
     public PaymentConfirmResult confirm(PaymentConfirmCommand command) {
         try {
             if (isAlreadySucceeded(command.orderId())) {
+                completeBookingPayment(command.orderId());
                 return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
             }
 
@@ -186,6 +191,12 @@ public class PaymentService {
             bookingCommandService.completePayment(orderId);
         } catch (Exception e) {
             log.error("Payment confirmed, but booking payment completion failed. orderId={}", orderId, e);
+        }
+    }
+
+    private void validateCheckoutReady(Booking booking) {
+        if (booking.getStatus() != BookingStatus.PAYMENT_PENDING) {
+            throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
     }
 }

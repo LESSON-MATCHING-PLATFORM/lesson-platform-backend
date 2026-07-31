@@ -1,6 +1,7 @@
 package com.kosa.fillinv.booking.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.kosa.fillinv.category.entity.Category;
 import com.kosa.fillinv.category.repository.CategoryRepository;
+import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.lesson.domain.LessonBuilder;
 import com.kosa.fillinv.lesson.entity.AvailableTime;
 import com.kosa.fillinv.lesson.entity.Lesson;
@@ -126,6 +128,29 @@ class BookingCommandServiceTest {
         BookingSession time = booking.getSessions().get(0);
         assertThat(time.getStartTime()).isEqualTo(startTime);
         assertThat(time.getEndTime()).isEqualTo(startTime.plus(selectedOption.getMinute(), ChronoUnit.MINUTES));
+    }
+
+    @Test
+    @DisplayName("멘토링 Booking 생성 시 startTime이 없으면 INVALID_ARGUMENT 예외가 발생한다")
+    void createMentoringBooking_whenStartTimeIsNull_throwsInvalidArgument() {
+        Lesson lesson = new LessonBuilder()
+                .lessonType(LessonType.MENTORING)
+                .categoryId(categoryId)
+                .withDefaultOptions()
+                .withDefaultAvailableTimes()
+                .build();
+        lessonRepository.save(lesson);
+
+        Option selectedOption = lesson.getOptionList().getFirst();
+        BookingCreateRequest request = new BookingCreateRequest(
+                lesson.getId(),
+                selectedOption.getId(),
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> bookingCommandService.createBooking("mentee-1", request))
+                .isInstanceOf(BusinessException.class);
     }
 
     @Test

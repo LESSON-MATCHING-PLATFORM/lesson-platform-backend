@@ -1,5 +1,6 @@
 package com.kosa.fillinv.payment.service;
 
+import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
@@ -36,6 +37,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
@@ -104,6 +106,8 @@ class PaymentServiceTest {
     @DisplayName("checkout 중복 요청 시 기존 Payment를 재사용하고 새로 저장하지 않는다")
     void checkout_whenPaymentAlreadyExists_reusesExistingPayment() {
         Payment existingPayment = payment();
+        given(bookingRepository.findById(existingPayment.getOrderId()))
+                .willReturn(Optional.of(paymentPendingBooking()));
         given(paymentRepository.findByOrderId(existingPayment.getOrderId()))
                 .willReturn(Optional.of(existingPayment));
 
@@ -112,7 +116,20 @@ class PaymentServiceTest {
         assertThat(result.orderId()).isEqualTo(existingPayment.getOrderId());
         assertThat(result.orderName()).isEqualTo(existingPayment.getOrderName());
         assertThat(result.amount()).isEqualTo(existingPayment.getAmount());
-        verify(bookingRepository, never()).findById(any());
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("checkout 시 Booking이 결제 대기 상태가 아니면 Payment를 생성하지 않는다")
+    void checkout_whenBookingIsNotPaymentPending_throwsInvalidStatus() {
+        Booking booking = booking(BookingStatus.CANCELED);
+        given(bookingRepository.findById(booking.getId()))
+                .willReturn(Optional.of(booking));
+
+        assertThatThrownBy(() -> paymentService.checkout(new CheckoutCommand(booking.getId())))
+                .isInstanceOf(BusinessException.class);
+
+        verify(paymentRepository, never()).findByOrderId(any());
         verify(paymentRepository, never()).save(any());
     }
 
@@ -147,8 +164,8 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("이미 SUCCESS인 결제 confirm 요청은 Toss를 다시 호출하지 않고 성공으로 응답한다")
-    void confirm_whenPaymentAlreadySuccess_skipsTossConfirm() {
+    @DisplayName("이미 SUCCESS인 결제 confirm 요청은 Toss를 다시 호출하지 않고 Booking 완료를 재시도한다")
+    void confirm_whenPaymentAlreadySuccess_skipsTossConfirmAndRetriesBookingCompletion() {
         PaymentConfirmCommand command = confirmCommand();
         given(paymentRepository.findByOrderId(command.orderId()))
                 .willReturn(Optional.of(successPayment()));
@@ -159,7 +176,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
         verify(tossPaymentClient, never()).confirm(any());
         verify(paymentUpdateService, never()).updateStatus(any());
-        verify(bookingCommandService, never()).completePayment(any());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -367,9 +384,13 @@ class PaymentServiceTest {
     }
 
     private Booking paymentPendingBooking() {
+        return booking(BookingStatus.PAYMENT_PENDING);
+    }
+
+    private Booking booking(BookingStatus status) {
         return Booking.builder()
                 .id("booking-001")
-                .status(BookingStatus.PAYMENT_PENDING)
+                .status(status)
                 .requestContent("멘토링 신청합니다")
                 .lessonTitle("자바 멘토링")
                 .lessonType("MENTORING")

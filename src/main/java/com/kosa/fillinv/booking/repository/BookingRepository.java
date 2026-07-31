@@ -59,8 +59,6 @@ public interface BookingRepository extends JpaRepository<Booking, String> {
             Pageable pageable
     );
 
-    BookingStatus status(BookingStatus status);
-
     @Query("SELECT new com.kosa.fillinv.lesson.service.dto.LessonCountVO(s.lessonId, COUNT(s)) " +
             "FROM Booking s " +
             "WHERE s.lessonId IN :lessonIds AND s.status IN :statuses " +

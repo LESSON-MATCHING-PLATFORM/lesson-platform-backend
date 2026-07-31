@@ -1,5 +1,6 @@
 package com.kosa.fillinv.schedule.service;
 
+import com.kosa.fillinv.global.exception.ResourceException;
 import com.kosa.fillinv.member.dto.profile.ProfileResponseDto;
 import com.kosa.fillinv.member.service.MemberService;
 import java.util.Collection;
@@ -19,8 +20,12 @@ class ScheduleParticipantProfileReader {
     }
 
     String getNickname(String memberId) {
-        return getProfiles(Set.of(memberId))
-                .get(memberId)
-                .nickname();
+        ProfileResponseDto profile = getProfiles(Set.of(memberId))
+                .get(memberId);
+        if (profile == null) {
+            throw new ResourceException.NotFound("Member profile not found. memberId: " + memberId);
+        }
+
+        return profile.nickname();
     }
 }

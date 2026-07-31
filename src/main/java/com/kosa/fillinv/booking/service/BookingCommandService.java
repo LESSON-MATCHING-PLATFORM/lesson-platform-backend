@@ -61,7 +61,7 @@ public class BookingCommandService {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        booking.updateStatus(BookingStatus.APPROVAL_PENDING);
+        booking.markPaymentCompleted();
     }
 
     // 멘토가 멘티의 레슨 수강신청을 승인했을 경우 (승인 대기 -> 승인)
@@ -146,6 +146,10 @@ public class BookingCommandService {
         Booking booking = buildBaseBooking(lesson, memberId, option, null, option.getPrice());
 
         Instant startTime = request.startTime();
+        if (startTime == null) {
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT);
+        }
+
         Instant endTime = startTime.plus(option.getMinute(), ChronoUnit.MINUTES); // 옵션의 분 단위를 더해서 종료 시간 계산
 
         booking.addSession(

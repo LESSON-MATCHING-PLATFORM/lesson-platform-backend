@@ -15,6 +15,11 @@ public abstract class CustomGlobalException extends RuntimeException {
         this.errorCode = errorCode;
     }
 
+    protected CustomGlobalException(final ErrorCode errorCode, final Throwable cause) {
+        super(errorCode.getMessage(), cause);
+        this.errorCode = errorCode;
+    }
+
     //  ErrorCode 기반 메세지 사용 시
     protected CustomGlobalException(final ErrorCode errorCode) {
         super(errorCode.getMessage());

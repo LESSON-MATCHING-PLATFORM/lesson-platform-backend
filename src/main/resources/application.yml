@@ -14,3 +14,5 @@ payment:
     publish-fixed-delay-ms: 5000
   refund:
     retry-fixed-delay-ms: 10000
+  booking-completion:
+    retry-fixed-delay-ms: 10000

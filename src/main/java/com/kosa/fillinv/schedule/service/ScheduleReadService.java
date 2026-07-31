@@ -6,6 +6,7 @@ import com.kosa.fillinv.schedule.repository.ScheduleSpecifications;
 import com.kosa.fillinv.schedule.service.dto.ScheduleSearchCondition;
 import com.kosa.fillinv.schedule.service.dto.ScheduleSortType;
 import com.kosa.fillinv.global.exception.BusinessException;
+import com.kosa.fillinv.global.exception.ResourceException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.member.dto.profile.ProfileResponseDto;
 import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
@@ -120,8 +121,8 @@ public class ScheduleReadService {
         return page.map(
                 session -> {
                     Booking booking = session.getBooking();
-                    ProfileResponseDto mentor = members.get(booking.getMentorId());
-                    ProfileResponseDto mentee = members.get(booking.getMenteeId());
+                    ProfileResponseDto mentor = requireProfile(members, booking.getMentorId());
+                    ProfileResponseDto mentee = requireProfile(members, booking.getMenteeId());
 
                     return ScheduleListResponse.from(
                             booking,
@@ -132,5 +133,14 @@ public class ScheduleReadService {
                     );
                 }
         );
+    }
+
+    private ProfileResponseDto requireProfile(Map<String, ProfileResponseDto> members, String memberId) {
+        ProfileResponseDto profile = members.get(memberId);
+        if (profile == null) {
+            throw new ResourceException.NotFound("Member profile not found. memberId: " + memberId);
+        }
+
+        return profile;
     }
 }
