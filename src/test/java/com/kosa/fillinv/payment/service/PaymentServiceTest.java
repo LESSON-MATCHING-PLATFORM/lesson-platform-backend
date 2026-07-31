@@ -16,10 +16,10 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.BookingCommandService;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.repository.BookingRepository;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,7 +55,7 @@ class PaymentServiceTest {
     private PaymentRepository paymentRepository;
 
     @Mock
-    private ScheduleRepository scheduleRepository;
+    private BookingRepository bookingRepository;
 
     @Mock
     private BookingCommandService bookingCommandService;
@@ -81,21 +81,21 @@ class PaymentServiceTest {
     @Test
     @DisplayName("checkout 시 스케줄 스냅샷으로 Payment를 생성한다")
     void checkout_createsPaymentFromScheduleSnapshot() {
-        Schedule schedule = paymentPendingSchedule();
-        given(scheduleRepository.findById(schedule.getId()))
-                .willReturn(Optional.of(schedule));
+        Booking booking = paymentPendingSchedule();
+        given(bookingRepository.findById(booking.getId()))
+                .willReturn(Optional.of(booking));
 
-        CheckoutResult result = paymentService.checkout(new CheckoutCommand(schedule.getId()));
+        CheckoutResult result = paymentService.checkout(new CheckoutCommand(booking.getId()));
 
         Payment savedPayment = savedPayment();
-        assertThat(savedPayment.getOrderId()).isEqualTo(schedule.getId());
+        assertThat(savedPayment.getOrderId()).isEqualTo(booking.getId());
         assertThat(savedPayment.getOrderName()).isEqualTo("자바 멘토링 - 30분");
-        assertThat(savedPayment.getBuyerId()).isEqualTo(schedule.getMenteeId());
-        assertThat(savedPayment.getSellerId()).isEqualTo(schedule.getMentorId());
-        assertThat(savedPayment.getAmount()).isEqualTo(schedule.getPrice());
+        assertThat(savedPayment.getBuyerId()).isEqualTo(booking.getMenteeId());
+        assertThat(savedPayment.getSellerId()).isEqualTo(booking.getMentorId());
+        assertThat(savedPayment.getAmount()).isEqualTo(booking.getPrice());
         assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.NOT_STARTED);
 
-        assertThat(result.orderId()).isEqualTo(schedule.getId());
+        assertThat(result.orderId()).isEqualTo(booking.getId());
         assertThat(result.orderName()).isEqualTo(savedPayment.getOrderName());
         assertThat(result.amount()).isEqualTo(savedPayment.getAmount());
     }
@@ -112,7 +112,7 @@ class PaymentServiceTest {
         assertThat(result.orderId()).isEqualTo(existingPayment.getOrderId());
         assertThat(result.orderName()).isEqualTo(existingPayment.getOrderName());
         assertThat(result.amount()).isEqualTo(existingPayment.getAmount());
-        verify(scheduleRepository, never()).findById(any());
+        verify(bookingRepository, never()).findById(any());
         verify(paymentRepository, never()).save(any());
     }
 
@@ -286,7 +286,7 @@ class PaymentServiceTest {
     }
 
     private void givenFailureWhenScheduleComplete(String orderId) {
-        org.mockito.Mockito.doThrow(new IllegalStateException("invalid schedule status"))
+        org.mockito.Mockito.doThrow(new IllegalStateException("invalid booking status"))
                 .when(bookingCommandService)
                 .completePayment(orderId);
     }
@@ -304,7 +304,7 @@ class PaymentServiceTest {
     }
 
     private PaymentConfirmCommand confirmCommand() {
-        return new PaymentConfirmCommand("payment-key-001", "schedule-001", 30000);
+        return new PaymentConfirmCommand("payment-key-001", "booking-001", 30000);
     }
 
     private Payment successPayment() {
@@ -333,7 +333,7 @@ class PaymentServiceTest {
                 .id("payment-001")
                 .buyerId("mentee-001")
                 .sellerId("mentor-001")
-                .orderId("schedule-001")
+                .orderId("booking-001")
                 .orderName("자바 멘토링 - 30분")
                 .amount(30000)
                 .build();
@@ -366,10 +366,10 @@ class PaymentServiceTest {
         );
     }
 
-    private Schedule paymentPendingSchedule() {
-        return Schedule.builder()
-                .id("schedule-001")
-                .status(ScheduleStatus.PAYMENT_PENDING)
+    private Booking paymentPendingSchedule() {
+        return Booking.builder()
+                .id("booking-001")
+                .status(BookingStatus.PAYMENT_PENDING)
                 .requestContent("멘토링 신청합니다")
                 .lessonTitle("자바 멘토링")
                 .lessonType("MENTORING")

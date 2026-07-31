@@ -1,4 +1,4 @@
-package com.kosa.fillinv.schedule.service;
+package com.kosa.fillinv.booking.service;
 
 import com.kosa.fillinv.category.entity.Category;
 import com.kosa.fillinv.category.repository.CategoryRepository;
@@ -12,10 +12,10 @@ import com.kosa.fillinv.lesson.repository.LessonRepository;
 import com.kosa.fillinv.lesson.repository.OptionRepository;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.member.repository.MemberRepository;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.repository.ScheduleTimeRepository;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.repository.BookingRepository;
+import com.kosa.fillinv.booking.repository.BookingSessionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -23,13 +23,13 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class BookingValidator {
 
-    private final ScheduleRepository scheduleRepository;
+    private final BookingRepository bookingRepository;
     private final LessonRepository lessonRepository;
     private final OptionRepository optionRepository;
     private final AvailableTimeRepository availableTimeRepository;
     private final CategoryRepository categoryRepository;
     private final MemberRepository memberRepository;
-    private final ScheduleTimeRepository scheduleTimeRepository;
+    private final BookingSessionRepository bookingSessionRepository;
 
     public Member getMentor(String mentorId) {
         return memberRepository.findById(mentorId)
@@ -56,13 +56,13 @@ public class BookingValidator {
                 .orElseThrow(() -> new BusinessException(ErrorCode.CATEGORY_NOT_FOUND));
     }
 
-    public Schedule getSchedule(String scheduleId) {
-        return scheduleRepository.findById(scheduleId)
+    public Booking getBooking(String bookingId) {
+        return bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SCHEDULE_NOT_FOUND));
     }
 
-    public ScheduleTime getScheduleTime(String scheduleTimeId) {
-        return scheduleTimeRepository.findById(scheduleTimeId)
+    public BookingSession getBookingSession(String bookingSessionId) {
+        return bookingSessionRepository.findById(bookingSessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SCHEDULE_TIME_NOT_FOUND));
     }
 

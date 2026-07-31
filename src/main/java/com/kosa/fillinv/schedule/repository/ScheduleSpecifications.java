@@ -1,9 +1,8 @@
 package com.kosa.fillinv.schedule.repository;
 
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
-import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
@@ -13,13 +12,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ScheduleTimeSpecifications {
+public class ScheduleSpecifications {
 
-    public static Specification<ScheduleTime> search(
+    public static Specification<BookingSession> search(
             String keyword,
             Instant from,
             Instant to,
-            ScheduleStatus status,
+            BookingStatus status,
             String mentorId,
             String menteeId,
             ScheduleParticipantRole role
@@ -33,38 +32,38 @@ public class ScheduleTimeSpecifications {
                 .and(participantEq(mentorId, menteeId, role));
     }
 
-    public static Specification<ScheduleTime> startTimeAfter(Instant from) {
+    public static Specification<BookingSession> startTimeAfter(Instant from) {
         return (root, query, cb) ->
                 from == null ? null : cb.greaterThanOrEqualTo(root.get("startTime"), from);
     }
 
-    public static Specification<ScheduleTime> startTimeBefore(Instant to) {
+    public static Specification<BookingSession> startTimeBefore(Instant to) {
         return (root, query, cb) ->
                 to == null ? null : cb.lessThanOrEqualTo(root.get("startTime"), to);
     }
 
-    public static Specification<ScheduleTime> bookingStatusEq(ScheduleStatus status) {
+    public static Specification<BookingSession> bookingStatusEq(BookingStatus status) {
         return (root, query, cb) -> {
             if (status == null) return null;
 
-            Join<ScheduleTime, Schedule> booking =
-                    root.join("schedule", JoinType.INNER);
+            Join<BookingSession, Booking> booking =
+                    root.join("booking", JoinType.INNER);
 
             return cb.equal(booking.get("status"), status);
         };
     }
 
-    public static Specification<ScheduleTime> fetchBooking() {
+    public static Specification<BookingSession> fetchBooking() {
         return (root, query, cb) -> {
             if (query.getResultType() != Long.class) {
-                root.fetch("schedule", JoinType.INNER);
+                root.fetch("booking", JoinType.INNER);
                 query.distinct(true);
             }
             return null;
         };
     }
 
-    public static Specification<ScheduleTime> participantEq(
+    public static Specification<BookingSession> participantEq(
             String mentorId,
             String menteeId,
             ScheduleParticipantRole role
@@ -75,8 +74,8 @@ public class ScheduleTimeSpecifications {
                 return null;
             }
 
-            Join<ScheduleTime, Schedule> booking =
-                    root.join("schedule", JoinType.INNER);
+            Join<BookingSession, Booking> booking =
+                    root.join("booking", JoinType.INNER);
 
             return switch (role) {
 
@@ -114,14 +113,14 @@ public class ScheduleTimeSpecifications {
         };
     }
 
-    public static Specification<ScheduleTime> lessonTitleContains(String keyword) {
+    public static Specification<BookingSession> lessonTitleContains(String keyword) {
         return (root, query, cb) -> {
             if (keyword == null || keyword.isBlank()) {
                 return null;
             }
 
-            Join<ScheduleTime, Schedule> booking =
-                    root.join("schedule", JoinType.INNER);
+            Join<BookingSession, Booking> booking =
+                    root.join("booking", JoinType.INNER);
 
             return cb.like(
                     cb.lower(booking.get("lessonTitle")),

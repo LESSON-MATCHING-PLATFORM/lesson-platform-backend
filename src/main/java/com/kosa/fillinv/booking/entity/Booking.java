@@ -1,4 +1,4 @@
-package com.kosa.fillinv.schedule.entity;
+package com.kosa.fillinv.booking.entity;
 
 import com.kosa.fillinv.global.entity.BaseEntity;
 import com.kosa.fillinv.global.exception.ResourceException;
@@ -26,7 +26,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Schedule extends BaseEntity {
+public class Booking extends BaseEntity {
 
     @Id
     @Column(name = "schedule_id", nullable = false)
@@ -34,7 +34,7 @@ public class Schedule extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
-    private ScheduleStatus status;
+    private BookingStatus status;
 
     @Column(name = "request_content")
     private String requestContent;
@@ -94,38 +94,39 @@ public class Schedule extends BaseEntity {
     @Column(name = "canceled_at")
     private Instant canceledAt;
 
-    // STUDY 레슨은 여러 scheduleTime을 가질 수 있기 때문에 List 사용
-    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL)
-    private List<ScheduleTime> scheduleTimeList = new ArrayList<>();
+    // STUDY 레슨은 여러 회차를 가질 수 있기 때문에 List 사용
+    @Builder.Default
+    @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL)
+    private List<BookingSession> sessions = new ArrayList<>();
 
-    public void addScheduleTime(ScheduleTime scheduleTime) {
-        scheduleTime.setSchedule(this); // 양방향 연관관계 설정
-        this.scheduleTimeList.add(scheduleTime);
+    public void addSession(BookingSession session) {
+        session.setBooking(this);
+        this.sessions.add(session);
     }
 
-    public void addScheduleTime(List<ScheduleTime> scheduleTimeList) {
-        scheduleTimeList.forEach(this::addScheduleTime);
+    public void addSessions(List<BookingSession> sessions) {
+        sessions.forEach(this::addSession);
     }
 
     // 스케쥴 상태 변경 메서드
-    public void updateStatus(ScheduleStatus scheduleStatus) {
+    public void updateStatus(BookingStatus scheduleStatus) {
         this.status = scheduleStatus;
     }
 
     public boolean cancel(BookingCancelReason reason) {
-        if (status == ScheduleStatus.CANCELED) {
+        if (status == BookingStatus.CANCELED) {
             return false;
         }
 
-        this.status = ScheduleStatus.CANCELED;
+        this.status = BookingStatus.CANCELED;
         this.cancelReason = reason;
         this.canceledAt = Instant.now();
         return true;
     }
 
     public void markPaymentCompleted() {
-        if (status != ScheduleStatus.PAYMENT_PENDING) return;
-        this.status = ScheduleStatus.APPROVAL_PENDING;
+        if (status != BookingStatus.PAYMENT_PENDING) return;
+        this.status = BookingStatus.APPROVAL_PENDING;
     }
 
     public void validateMentor(String mentorId) {

@@ -1,20 +1,19 @@
-package com.kosa.fillinv.schedule.service;
+package com.kosa.fillinv.booking.service;
 
 import com.kosa.fillinv.category.entity.Category;
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.lesson.entity.AvailableTime;
 import com.kosa.fillinv.lesson.entity.Lesson;
-import com.kosa.fillinv.lesson.entity.LessonType;
 import com.kosa.fillinv.lesson.entity.Option;
 import com.kosa.fillinv.lesson.repository.AvailableTimeRepository;
 import com.kosa.fillinv.member.entity.Member;
-import com.kosa.fillinv.schedule.dto.request.BookingCreateRequest;
-import com.kosa.fillinv.schedule.entity.BookingCancelReason;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
+import com.kosa.fillinv.booking.dto.request.BookingCreateRequest;
+import com.kosa.fillinv.booking.entity.BookingCancelReason;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.repository.BookingRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -31,167 +30,167 @@ import org.springframework.transaction.annotation.Transactional;
 public class BookingCommandService {
 
     private final BookingValidator validator;
-    private final ScheduleRepository scheduleRepository;
+    private final BookingRepository bookingRepository;
     private final AvailableTimeRepository availableTimeRepository;
     private final BookingStockService bookingStockService;
 
     public String createBooking(String memberId, BookingCreateRequest request) {
         Lesson lesson = validator.getLesson(request.lessonId());
 
-        Schedule schedule = switch (lesson.getLessonType()) {
+        Booking booking = switch (lesson.getLessonType()) {
             case MENTORING -> createMentoringBooking(lesson, memberId, request);
             case ONEDAY -> createOnedayBooking(lesson, memberId, request);
             case STUDY -> createStudyBooking(lesson, memberId);
             default -> throw new BusinessException(ErrorCode.INVALID_LESSON_TYPE);
         };
 
-        Schedule saved = scheduleRepository.save(schedule);
+        Booking saved = bookingRepository.save(booking);
 
         bookingStockService.reserve(saved);
 
-        scheduleRepository.save(schedule);
-        return schedule.getId();
+        bookingRepository.save(booking);
+        return booking.getId();
     }
 
     @Transactional
-    public void completePayment(String scheduleId) {
-        Schedule schedule = validator.getSchedule(scheduleId);
+    public void completePayment(String bookingId) {
+        Booking booking = validator.getBooking(bookingId);
 
         // 결제 대기 상태인 스케쥴만 승인 대기로 상태 변경 가능
-        if (schedule.getStatus() != ScheduleStatus.PAYMENT_PENDING) {
+        if (booking.getStatus() != BookingStatus.PAYMENT_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        schedule.updateStatus(ScheduleStatus.APPROVAL_PENDING);
+        booking.updateStatus(BookingStatus.APPROVAL_PENDING);
     }
 
     // 멘토가 멘티의 레슨 수강신청을 승인했을 경우 (승인 대기 -> 승인)
     @Transactional
-    public void approveLessonByMentor(String memberId, String scheduleId) {
-        Schedule schedule = validator.getSchedule(scheduleId);
+    public void approveLessonByMentor(String memberId, String bookingId) {
+        Booking booking = validator.getBooking(bookingId);
 
         // 대기중인 스케줄 승인은 멘토만 가능
-        schedule.validateMentor(memberId);
+        booking.validateMentor(memberId);
 
         // 승인 대기 상태인 스케쥴만 승인으로 상태 변경 가능
-        if (schedule.getStatus() != ScheduleStatus.APPROVAL_PENDING) {
+        if (booking.getStatus() != BookingStatus.APPROVAL_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        schedule.updateStatus(ScheduleStatus.APPROVED);
+        booking.updateStatus(BookingStatus.APPROVED);
     }
 
 
     // 멘토가 멘티의 레슨 수강신청을 거절했을 경우(승인 대기 -> 취소)
     @Transactional
-    public void rejectLessonByMentor(String memberId, String scheduleId) {
-        Schedule schedule = validator.getSchedule(scheduleId);
+    public void rejectLessonByMentor(String memberId, String bookingId) {
+        Booking booking = validator.getBooking(bookingId);
 
         // 스케쥴 취소는 스케쥴 멘토만 가능
-        schedule.validateMentor(memberId);
+        booking.validateMentor(memberId);
 
         // 승인 대기 상태인 스케쥴만 취소로 상태 변경 가능
-        if (schedule.getStatus() != ScheduleStatus.APPROVAL_PENDING) {
+        if (booking.getStatus() != BookingStatus.APPROVAL_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        cancelWithStockRestore(schedule, BookingCancelReason.MENTOR_REJECTED);
+        cancelWithStockRestore(booking, BookingCancelReason.MENTOR_REJECTED);
     }
 
     @Transactional
-    public void cancelByRefund(String scheduleId) {
-        Schedule schedule = validator.getSchedule(scheduleId);
+    public void cancelByRefund(String bookingId) {
+        Booking booking = validator.getBooking(bookingId);
 
-        if (schedule.getStatus() == ScheduleStatus.CANCELED) {
+        if (booking.getStatus() == BookingStatus.CANCELED) {
             return;
         }
 
-        if (schedule.getStatus() != ScheduleStatus.APPROVAL_PENDING &&
-                schedule.getStatus() != ScheduleStatus.APPROVED) {
+        if (booking.getStatus() != BookingStatus.APPROVAL_PENDING &&
+                booking.getStatus() != BookingStatus.APPROVED) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        cancelWithStockRestore(schedule, BookingCancelReason.REFUND_COMPLETED);
+        cancelWithStockRestore(booking, BookingCancelReason.REFUND_COMPLETED);
     }
 
     // 해당 레슨 수강이 모두 끝난 경우 (승인 -> 완료)
     @Transactional
-    public void completeLesson(String memberId, String scheduleId) {
-        Schedule schedule = validator.getSchedule(scheduleId);
+    public void completeLesson(String memberId, String bookingId) {
+        Booking booking = validator.getBooking(bookingId);
 
         // 스케쥴 완료는 멘티만 가능
-        schedule.validateMentee(memberId);
+        booking.validateMentee(memberId);
 
         // 승인 상태인 스케쥴만 완료로 상태 변경 가능
-        if (schedule.getStatus() != ScheduleStatus.APPROVED) {
+        if (booking.getStatus() != BookingStatus.APPROVED) {
             throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
 
-        schedule.updateStatus(ScheduleStatus.COMPLETED);
+        booking.updateStatus(BookingStatus.COMPLETED);
     }
 
-    private void cancelWithStockRestore(Schedule schedule, BookingCancelReason reason) {
-        boolean canceled = schedule.cancel(reason);
+    private void cancelWithStockRestore(Booking booking, BookingCancelReason reason) {
+        boolean canceled = booking.cancel(reason);
         if (canceled) {
-            bookingStockService.restore(schedule);
+            bookingStockService.restore(booking);
         }
     }
 
-    private Schedule createMentoringBooking(
+    private Booking createMentoringBooking(
             Lesson lesson,
             String memberId,
             BookingCreateRequest request
     ) {
         Option option = validator.getOption(request.optionId());
 
-        Schedule schedule = buildBaseBooking(lesson, memberId, option, null, option.getPrice());
+        Booking booking = buildBaseBooking(lesson, memberId, option, null, option.getPrice());
 
         Instant startTime = request.startTime();
         Instant endTime = startTime.plus(option.getMinute(), ChronoUnit.MINUTES); // 옵션의 분 단위를 더해서 종료 시간 계산
 
-        schedule.addScheduleTime(
-                ScheduleTime.of(startTime, endTime, schedule)
+        booking.addSession(
+                BookingSession.of(startTime, endTime, booking)
         );
 
-        return schedule;
+        return booking;
     }
 
-    private Schedule createOnedayBooking(
+    private Booking createOnedayBooking(
             Lesson lesson,
             String memberId,
             BookingCreateRequest request
     ) {
         AvailableTime availableTime = validator.getAvailableTime(request.availableTimeId());
 
-        Schedule schedule = buildBaseBooking(lesson, memberId, null, availableTime, availableTime.getPrice());
+        Booking booking = buildBaseBooking(lesson, memberId, null, availableTime, availableTime.getPrice());
 
-        schedule.addScheduleTime(
-                ScheduleTime.of(
+        booking.addSession(
+                BookingSession.of(
                         availableTime.getStartTime(),
                         availableTime.getEndTime(),
-                        schedule
+                        booking
                 )
         );
 
-        return schedule;
+        return booking;
     }
 
-    private Schedule createStudyBooking(
+    private Booking createStudyBooking(
             Lesson lesson,
             String memberId
     ) {
-        Schedule schedule = buildBaseBooking(lesson, memberId, null, null, lesson.getPrice());
+        Booking booking = buildBaseBooking(lesson, memberId, null, null, lesson.getPrice());
 
-        List<ScheduleTime> times = availableTimeRepository
+        List<BookingSession> sessions = availableTimeRepository
                 .findAllByLessonId(lesson.getId())
                 .stream()
-                .map(at -> ScheduleTime.of(at.getStartTime(), at.getEndTime(), schedule))
+                .map(at -> BookingSession.of(at.getStartTime(), at.getEndTime(), booking))
                 .toList();
 
-        schedule.addScheduleTime(times);
-        return schedule;
+        booking.addSessions(sessions);
+        return booking;
     }
-    public Schedule buildBaseBooking(
+    public Booking buildBaseBooking(
             Lesson lesson,
             String memberId,
             Option option,
@@ -201,7 +200,7 @@ public class BookingCommandService {
         Category category = validator.getCategory(lesson.getCategoryId());
         Member mentor = validator.getMentor(lesson.getMentorId());
 
-        return Schedule.builder()
+        return Booking.builder()
                 .id(UUID.randomUUID().toString())
                 .mentorId(lesson.getMentorId())
                 .menteeId(memberId)
@@ -219,8 +218,8 @@ public class BookingCommandService {
                 .optionName(option != null ? option.getName() : null)
                 .optionMinute(option != null ? option.getMinute() : null)
                 .availableTimeId(availableTime != null ? availableTime.getId() : null)
-                .status(ScheduleStatus.PAYMENT_PENDING)
-                .scheduleTimeList(new ArrayList<>())
+                .status(BookingStatus.PAYMENT_PENDING)
+                .sessions(new ArrayList<>())
                 .build();
     }
 }

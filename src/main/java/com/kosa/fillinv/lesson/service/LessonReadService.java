@@ -8,7 +8,7 @@ import com.kosa.fillinv.lesson.controller.dto.LessonSearchRequest;
 import com.kosa.fillinv.lesson.entity.LessonType;
 import com.kosa.fillinv.lesson.service.client.*;
 import com.kosa.fillinv.lesson.service.dto.*;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -37,11 +37,11 @@ public class LessonReadService {
 
     private final CategoryService categoryService;
 
-    private final ScheduleClient scheduleClient;
+    private final BookingClient bookingClient;
 
-    private static final Set<ScheduleStatus> PARTICIPATED_STATUSES = Set.of(ScheduleStatus.APPROVED, ScheduleStatus.COMPLETED);
+    private static final Set<BookingStatus> PARTICIPATED_STATUSES = Set.of(BookingStatus.APPROVED, BookingStatus.COMPLETED);
 
-    private static final Set<ScheduleStatus> MENTORING_BOOKED_STATUES = Set.of(ScheduleStatus.PAYMENT_PENDING, ScheduleStatus.APPROVAL_PENDING, ScheduleStatus.APPROVED);
+    private static final Set<BookingStatus> MENTORING_BOOKED_STATUES = Set.of(BookingStatus.PAYMENT_PENDING, BookingStatus.APPROVAL_PENDING, BookingStatus.APPROVED);
 
     public Page<LessonThumbnail> search() {
         return search(LessonSearchRequest.empty());
@@ -126,14 +126,14 @@ public class LessonReadService {
             availableTimeRemainSeats = stockMap;
         }
 
-        Integer menteeCount = scheduleClient.countByLessonIdAndStatusIn(
+        Integer menteeCount = bookingClient.countByLessonIdAndStatusIn(
                 request.lessonId(),
                 PARTICIPATED_STATUSES
         );
 
         List<BookedTimeVO> bookedTimes = null;
         if (lessonDTO.lessonType() == LessonType.MENTORING) {
-            bookedTimes = scheduleClient.getBookedTimes(
+            bookedTimes = bookingClient.getBookedTimes(
                     request.lessonId(),
                     MENTORING_BOOKED_STATUES,
                     Instant.now().minus(7, ChronoUnit.DAYS) // 모든 schedule_time을 가져오지 않게
@@ -173,7 +173,7 @@ public class LessonReadService {
         Map<String, Float> averageRating =
                 reviewClient.getAverageRating(lessonIds);
 
-        Map<String, Integer> menteeCountMap = scheduleClient.countByLessonIdInAndStatusIn(
+        Map<String, Integer> menteeCountMap = bookingClient.countByLessonIdInAndStatusIn(
                 lessonIds,
                 PARTICIPATED_STATUSES
         );

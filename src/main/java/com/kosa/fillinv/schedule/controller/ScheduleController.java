@@ -6,12 +6,12 @@ import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.global.response.SuccessResponse;
 import com.kosa.fillinv.global.security.details.CustomMemberDetails;
-import com.kosa.fillinv.schedule.dto.request.BookingCreateRequest;
-import com.kosa.fillinv.schedule.dto.response.BookingCreateResponse;
+import com.kosa.fillinv.booking.dto.request.BookingCreateRequest;
+import com.kosa.fillinv.booking.dto.response.BookingCreateResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleListResponse;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.service.BookingCommandService;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -82,7 +82,7 @@ public class ScheduleController {
             @AuthenticationPrincipal CustomMemberDetails customMemberDetails, // 로그인한 사용자 ID
             @RequestParam Instant from,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) ScheduleStatus status,
+            @RequestParam(required = false) BookingStatus status,
             @RequestParam(defaultValue = "0") Integer page,
             @RequestParam(defaultValue = "10") Integer size
     ) {
@@ -108,7 +108,7 @@ public class ScheduleController {
             @AuthenticationPrincipal CustomMemberDetails customMemberDetails, // 로그인한 사용자 ID
             @RequestParam Instant to,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) ScheduleStatus status,
+            @RequestParam(required = false) BookingStatus status,
             @RequestParam(defaultValue = "0") Integer page,
             @RequestParam(defaultValue = "10") Integer size
     ) {
@@ -171,7 +171,7 @@ public class ScheduleController {
     public ResponseEntity<SuccessResponse<Void>> updateStatus(
             @AuthenticationPrincipal CustomMemberDetails customMemberDetails,
             @PathVariable String scheduleId,
-            @RequestParam ScheduleStatus next
+            @RequestParam BookingStatus next
     ) {
         String memberId = customMemberDetails.memberId();
 

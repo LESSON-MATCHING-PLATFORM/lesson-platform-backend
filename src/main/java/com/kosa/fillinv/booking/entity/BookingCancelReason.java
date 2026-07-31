@@ -1,4 +1,4 @@
-package com.kosa.fillinv.schedule.entity;
+package com.kosa.fillinv.booking.entity;
 
 public enum BookingCancelReason {
     USER_PAYMENT_ABORTED,

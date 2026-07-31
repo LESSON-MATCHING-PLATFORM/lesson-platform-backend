@@ -2,8 +2,8 @@ package com.kosa.fillinv.lesson.service.client;
 
 import com.kosa.fillinv.lesson.service.dto.BookedTimeVO;
 import com.kosa.fillinv.lesson.service.dto.LessonCountVO;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.repository.BookingRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -15,16 +15,16 @@ import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
-public class DefaultScheduleClient implements ScheduleClient {
+public class DefaultBookingClient implements BookingClient {
 
-    private final ScheduleRepository scheduleRepository;
+    private final BookingRepository bookingRepository;
 
     @Override
     public Map<String, Integer> countByLessonIdInAndStatusIn(
             Collection<String> lessonIds,
-            Collection<ScheduleStatus> statuses
+            Collection<BookingStatus> statuses
     ) {
-        return scheduleRepository.countByLessonIdInAndStatusIn(lessonIds, statuses)
+        return bookingRepository.countByLessonIdInAndStatusIn(lessonIds, statuses)
                 .stream()
                 .collect(
                         Collectors.toMap(LessonCountVO::lessonId, vo -> vo.count().intValue())
@@ -32,13 +32,13 @@ public class DefaultScheduleClient implements ScheduleClient {
     }
 
     @Override
-    public Integer countByLessonIdAndStatusIn(String lessonId, Collection<ScheduleStatus> statuses) {
-        Long count = scheduleRepository.countByLessonIdAndStatusIn(lessonId, statuses);
+    public Integer countByLessonIdAndStatusIn(String lessonId, Collection<BookingStatus> statuses) {
+        Long count = bookingRepository.countByLessonIdAndStatusIn(lessonId, statuses);
         return count != null ? count.intValue() : 0;
     }
 
     @Override
-    public List<BookedTimeVO> getBookedTimes(String lessonId, Collection<ScheduleStatus> statuses, Instant since) {
-        return scheduleRepository.findBookedTimesByLessonIdAndStatusInAndStartTimeAfter(lessonId, statuses, since);
+    public List<BookedTimeVO> getBookedTimes(String lessonId, Collection<BookingStatus> statuses, Instant since) {
+        return bookingRepository.findBookedTimesByLessonIdAndStatusInAndStartTimeAfter(lessonId, statuses, since);
     }
 }

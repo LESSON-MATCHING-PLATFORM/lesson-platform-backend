@@ -1,8 +1,8 @@
 package com.kosa.fillinv.schedule.dto.response;
 
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 
 import java.time.Instant;
 
@@ -15,13 +15,13 @@ public record ScheduleListResponse( // 스케쥴 상태 일치 조회
         Instant startTime,
         Instant endTime,
         Integer price,
-        ScheduleStatus status,
+        BookingStatus status,
         String lessonType,
         String optionName,
         String userRole // "MENTOR" 또는 "MENTEE"
 ) {
     // 역할이 이미 정해진 목록 조회용 (mentee/mentor 전용 API)
-    public static ScheduleListResponse from(Schedule s, String mentorNickname, String menteeNickname, Instant startTime) {
+    public static ScheduleListResponse from(Booking s, String mentorNickname, String menteeNickname, Instant startTime) {
         return new ScheduleListResponse(
                 s.getId(),
                 s.getLessonTitle(),
@@ -38,15 +38,15 @@ public record ScheduleListResponse( // 스케쥴 상태 일치 조회
         );
     }
 
-    public static ScheduleListResponse from(Schedule s, String mentorNickname, String menteeNickname, ScheduleTime scheduleTime, String userRole) {
+    public static ScheduleListResponse from(Booking s, String mentorNickname, String menteeNickname, BookingSession session, String userRole) {
         return new ScheduleListResponse(
                 s.getId(),
                 s.getLessonTitle(),
                 mentorNickname,
                 menteeNickname,
-                scheduleTime.getId(),
-                scheduleTime.getStartTime(),
-                scheduleTime.getEndTime(),
+                session.getId(),
+                session.getStartTime(),
+                session.getEndTime(),
                 s.getPrice(),
                 s.getStatus(),
                 s.getLessonType(),
@@ -56,7 +56,7 @@ public record ScheduleListResponse( // 스케쥴 상태 일치 조회
     }
 
     // 역할 구분이 필요한 통합 조회용 (캘린더/상세 API)
-    public static ScheduleListResponse from(Schedule s, String mentorNickname, String menteeNickname, Instant startTime, String userRole) {
+    public static ScheduleListResponse from(Booking s, String mentorNickname, String menteeNickname, Instant startTime, String userRole) {
         return new ScheduleListResponse(
                 s.getId(),
                 s.getLessonTitle(),

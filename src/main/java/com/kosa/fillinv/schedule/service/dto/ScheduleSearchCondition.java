@@ -1,6 +1,6 @@
 package com.kosa.fillinv.schedule.service.dto;
 
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
 import lombok.Builder;
 import lombok.With;
@@ -10,7 +10,7 @@ import java.time.Instant;
 @Builder(toBuilder = true)
 public record ScheduleSearchCondition(
         @With String keyword,
-        @With ScheduleStatus status,
+        @With BookingStatus status,
         @With Instant from,
         @With Instant to,
         @With ScheduleSortType sortType,

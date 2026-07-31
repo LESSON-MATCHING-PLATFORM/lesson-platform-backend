@@ -10,7 +10,7 @@ import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
-import com.kosa.fillinv.schedule.service.BookingCommandService;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import jakarta.persistence.PersistenceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

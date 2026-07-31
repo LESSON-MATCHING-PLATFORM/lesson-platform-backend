@@ -2,7 +2,7 @@ package com.kosa.fillinv.review.entity;
 
 import com.kosa.fillinv.global.entity.BaseEntity;
 import com.kosa.fillinv.member.entity.Member;
-import com.kosa.fillinv.schedule.entity.Schedule;
+import com.kosa.fillinv.booking.entity.Booking;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -44,5 +44,5 @@ public class Review extends BaseEntity {
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "schedule_id", insertable = false, updatable = false)
-    private Schedule schedule;
+    private Booking booking;
 }

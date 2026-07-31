@@ -5,10 +5,10 @@ import com.kosa.fillinv.review.dto.*;
 import com.kosa.fillinv.review.entity.Review;
 import com.kosa.fillinv.review.exception.ReviewException;
 import com.kosa.fillinv.review.repository.ReviewRepository;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.exception.ScheduleException;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.exception.BookingException;
+import com.kosa.fillinv.booking.repository.BookingRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 public class ReviewService {
 
     private final ReviewRepository reviewRepository;
-    private final ScheduleRepository scheduleRepository;
+    private final BookingRepository bookingRepository;
 
     @Transactional(readOnly = true)
     public LessonReviewListResponseDTO getReviewListByLesson(String lessonId, Pageable pageable) {
@@ -46,7 +46,7 @@ public class ReviewService {
 
     @Transactional(readOnly = true)
     public Page<UnwrittenReviewResponseDTO> getUnwrittenReviews(String memberId, Pageable pageable) {
-        return scheduleRepository.findUnwrittenReviews(memberId, pageable)
+        return bookingRepository.findUnwrittenReviews(memberId, pageable)
                 .map(UnwrittenReviewResponseDTO::from);
     }
 
@@ -62,18 +62,18 @@ public class ReviewService {
 
     @Transactional
     public ReviewCreateResponseDTO createReview(String memberId, ReviewRequestDTO requestDTO) {
-        Schedule schedule = scheduleRepository.findById(requestDTO.scheduleId())
-                .orElseThrow(ScheduleException.ScheduleNotFound::new);
+        Booking booking = bookingRepository.findById(requestDTO.scheduleId())
+                .orElseThrow(BookingException.BookingNotFound::new);
 
-        if (schedule.getStatus() != ScheduleStatus.COMPLETED) {
+        if (booking.getStatus() != BookingStatus.COMPLETED) {
             throw new ReviewException(ErrorCode.REVIEW_NOT_ALLOWED);
         }
 
-        if (!schedule.getMenteeId().equals(memberId)) {
+        if (!booking.getMenteeId().equals(memberId)) {
             throw new ReviewException(ErrorCode.ACCESS_DENIED);
         }
 
-        if (reviewRepository.existsByScheduleId(schedule.getId())) {
+        if (reviewRepository.existsByScheduleId(booking.getId())) {
             throw new ReviewException(ErrorCode.REVIEW_ALREADY_EXISTS);
         }
 
@@ -82,8 +82,8 @@ public class ReviewService {
                 .score(requestDTO.score())
                 .content(requestDTO.content())
                 .writerId(memberId)
-                .lessonId(schedule.getLessonId())
-                .scheduleId(schedule.getId())
+                .lessonId(booking.getLessonId())
+                .scheduleId(booking.getId())
                 .build();
 
         reviewRepository.save(review);

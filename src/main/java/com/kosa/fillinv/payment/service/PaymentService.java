@@ -14,9 +14,9 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.BookingCommandService;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.repository.BookingRepository;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,7 +35,7 @@ public class PaymentService {
     private final PaymentUpdateService paymentUpdateService;
     private final TossPaymentClient tossPaymentClient;
     private final PaymentRepository paymentRepository;
-    private final ScheduleRepository scheduleRepository;
+    private final BookingRepository bookingRepository;
     private final BookingCommandService bookingCommandService;
     private final PaymentOutboxService paymentOutboxService;
     private final TransactionTemplate transactionTemplate;
@@ -47,9 +47,9 @@ public class PaymentService {
     @Transactional
     public CheckoutResult checkout(CheckoutCommand command) {
 
-        String scheduleId = command.scheduleId();
+        String bookingId = command.scheduleId();
 
-        Payment existingPayment = paymentRepository.findByOrderId(scheduleId)
+        Payment existingPayment = paymentRepository.findByOrderId(bookingId)
                 .orElse(null);
         if (existingPayment != null) {
             return new CheckoutResult(
@@ -60,19 +60,19 @@ public class PaymentService {
         }
 
         // 결제할 스케쥴 정보 조회
-        Schedule schedule = scheduleRepository.findById(scheduleId)
-                .orElseThrow(() -> new ResourceException.NotFound("스케쥴을 찾을 수 없습니다. scheduleId: " + scheduleId));
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceException.NotFound("스케쥴을 찾을 수 없습니다. bookingId: " + bookingId));
 
-        Integer amount = schedule.getPrice();
-        String orderName = schedule.getLessonTitle() + (schedule.getOptionName() != null ? " - " + schedule.getOptionName() : "");
+        Integer amount = booking.getPrice();
+        String orderName = booking.getLessonTitle() + (booking.getOptionName() != null ? " - " + booking.getOptionName() : "");
 
         // 결제 준비
         Payment initPayment = Payment.builder()
                 .id(UUID.randomUUID().toString())
-                .orderId(scheduleId)
+                .orderId(bookingId)
                 .orderName(orderName)
-                .buyerId(schedule.getMenteeId())
-                .sellerId(schedule.getMentorId())
+                .buyerId(booking.getMenteeId())
+                .sellerId(booking.getMentorId())
                 .amount(amount)
                 .build();
 
@@ -185,7 +185,7 @@ public class PaymentService {
         try {
             bookingCommandService.completePayment(orderId);
         } catch (Exception e) {
-            log.error("Payment confirmed, but schedule payment completion failed. orderId={}", orderId, e);
+            log.error("Payment confirmed, but booking payment completion failed. orderId={}", orderId, e);
         }
     }
 }

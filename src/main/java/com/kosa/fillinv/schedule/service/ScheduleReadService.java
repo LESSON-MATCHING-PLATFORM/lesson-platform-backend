@@ -1,6 +1,8 @@
 package com.kosa.fillinv.schedule.service;
 
-import com.kosa.fillinv.schedule.repository.ScheduleTimeSpecifications;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.repository.BookingSessionRepository;
+import com.kosa.fillinv.schedule.repository.ScheduleSpecifications;
 import com.kosa.fillinv.schedule.service.dto.ScheduleSearchCondition;
 import com.kosa.fillinv.schedule.service.dto.ScheduleSortType;
 import com.kosa.fillinv.global.exception.BusinessException;
@@ -9,11 +11,9 @@ import com.kosa.fillinv.member.dto.profile.ProfileResponseDto;
 import com.kosa.fillinv.member.service.MemberService;
 import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleListResponse;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
+import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
-import com.kosa.fillinv.schedule.repository.ScheduleTimeRepository;
-import com.kosa.fillinv.schedule.service.BookingValidator;
+import com.kosa.fillinv.booking.service.BookingValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -32,15 +32,15 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class ScheduleReadService {
 
-    private final ScheduleTimeRepository scheduleTimeRepository;
+    private final BookingSessionRepository bookingSessionRepository;
     private final MemberService memberService;
     private final BookingValidator validator;
 
     public ScheduleDetailResponse getScheduleDetail(String memberId, String bookingId, String scheduleTimeId) {
-        Schedule booking = validator.getSchedule(bookingId);
-        ScheduleTime scheduleTime = validator.getScheduleTime(scheduleTimeId);
+        Booking booking = validator.getBooking(bookingId);
+        BookingSession session = validator.getBookingSession(scheduleTimeId);
 
-        if (!scheduleTime.getSchedule().getId().equals(bookingId)) {
+        if (!session.getBooking().getId().equals(bookingId)) {
             throw new BusinessException(ErrorCode.SCHEDULE_TIME_MISMATCH);
         }
 
@@ -51,7 +51,7 @@ public class ScheduleReadService {
                 booking,
                 mentorNickname,
                 menteeNickname,
-                scheduleTime,
+                session,
                 booking.getRole(memberId)
         );
     }
@@ -88,8 +88,8 @@ public class ScheduleReadService {
         PageRequest pageRequest =
                 PageRequest.of(condition.page(), condition.size(), sort);
 
-        Specification<ScheduleTime> spec =
-                ScheduleTimeSpecifications.search(
+        Specification<BookingSession> spec =
+                ScheduleSpecifications.search(
                         condition.keyword(),
                         condition.from(),
                         condition.to(),
@@ -101,14 +101,14 @@ public class ScheduleReadService {
                         condition.participantRole()
                 );
 
-        Page<ScheduleTime> page = scheduleTimeRepository.findAll(spec, pageRequest);
+        Page<BookingSession> page = bookingSessionRepository.findAll(spec, pageRequest);
 
         return convert(condition.memberId(), page);
     }
 
-    public Page<ScheduleListResponse> convert(String memberId, Page<ScheduleTime> page) {
-        Set<Schedule> bookings = page.getContent().stream()
-                .map(ScheduleTime::getSchedule)
+    public Page<ScheduleListResponse> convert(String memberId, Page<BookingSession> page) {
+        Set<Booking> bookings = page.getContent().stream()
+                .map(BookingSession::getBooking)
                 .collect(Collectors.toSet());
 
         Set<String> memberIds =
@@ -120,8 +120,8 @@ public class ScheduleReadService {
         Map<String, ProfileResponseDto> members = memberService.getAllProfilesByMemberIds(memberIds);
 
         return page.map(
-                scheduleTime -> {
-                    Schedule booking = scheduleTime.getSchedule();
+                session -> {
+                    Booking booking = session.getBooking();
                     ProfileResponseDto mentor = members.get(booking.getMentorId());
                     ProfileResponseDto mentee = members.get(booking.getMenteeId());
 
@@ -129,7 +129,7 @@ public class ScheduleReadService {
                             booking,
                             mentor.nickname(),
                             mentee.nickname(),
-                            scheduleTime,
+                            session,
                             booking.getRole(memberId)
                     );
                 }

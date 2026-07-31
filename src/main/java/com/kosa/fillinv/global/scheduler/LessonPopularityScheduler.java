@@ -7,7 +7,7 @@ import com.kosa.fillinv.lesson.repository.LessonRepository;
 import com.kosa.fillinv.lesson.repository.LessonTempRepository;
 import com.kosa.fillinv.review.dto.ReviewStatsDTO;
 import com.kosa.fillinv.review.repository.ReviewRepository;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
+import com.kosa.fillinv.booking.repository.BookingRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -32,7 +32,7 @@ public class LessonPopularityScheduler {
     private static final double REVIEW_COUNT_WEIGHT = 0.2;
     private static final double BAYESIAN_AVG_WEIGHT = 0.2;
     private final LessonRepository lessonRepository;
-    private final ScheduleRepository scheduleRepository;
+    private final BookingRepository scheduleRepository;
     private final ReviewRepository reviewRepository;
     private final LessonTempRepository lessonTempRepository;
     private final LessonBulkRepository lessonBulkRepository;
