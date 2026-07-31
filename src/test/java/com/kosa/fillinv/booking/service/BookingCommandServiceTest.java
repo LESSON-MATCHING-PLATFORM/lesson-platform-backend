@@ -82,8 +82,8 @@ class BookingCommandServiceTest {
     }
 
     @Test
-    @DisplayName("멘토링 레슨 스케줄 생성 성공")
-    void createMentoringSchedule() {
+    @DisplayName("멘토링 레슨 Booking 생성 성공")
+    void createMentoringBooking() {
         // given
         Lesson lesson = new LessonBuilder()
                 .lessonType(LessonType.MENTORING)
@@ -129,8 +129,8 @@ class BookingCommandServiceTest {
     }
 
     @Test
-    @DisplayName("원데이 레슨 스케줄 생성 성공")
-    void createOnedaySchedule() {
+    @DisplayName("원데이 레슨 Booking 생성 성공")
+    void createOnedayBooking() {
         // given
         Lesson lesson = new LessonBuilder()
                 .lessonType(LessonType.ONEDAY)
@@ -177,7 +177,7 @@ class BookingCommandServiceTest {
 
     @Test
     @DisplayName("스터디 레슨은 AvailableTime 전체가 BookingSession으로 생성된다")
-    void createStudySchedule() {
+    void createStudyBooking() {
         // given
         Lesson lesson = new LessonBuilder()
                 .lessonType(LessonType.STUDY)

@@ -79,9 +79,9 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("checkout 시 스케줄 스냅샷으로 Payment를 생성한다")
-    void checkout_createsPaymentFromScheduleSnapshot() {
-        Booking booking = paymentPendingSchedule();
+    @DisplayName("checkout 시 Booking 스냅샷으로 Payment를 생성한다")
+    void checkout_createsPaymentFromBookingSnapshot() {
+        Booking booking = paymentPendingBooking();
         given(bookingRepository.findById(booking.getId()))
                 .willReturn(Optional.of(booking));
 
@@ -117,8 +117,8 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("confirm 성공 시 결제를 SUCCESS로 변경하고 스케줄 결제 완료 처리를 호출한다")
-    void confirm_success_updatesPaymentAndCompletesSchedulePayment() {
+    @DisplayName("confirm 성공 시 결제를 SUCCESS로 변경하고 Booking 결제 완료 처리를 호출한다")
+    void confirm_success_updatesPaymentAndCompletesBookingPayment() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
@@ -230,7 +230,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 스케줄은 변경하지 않는다")
+    @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 Booking은 변경하지 않는다")
     void confirm_failure_updatesPaymentFailureOnly() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
@@ -249,7 +249,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 스케줄은 변경하지 않는다")
+    @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 Booking은 변경하지 않는다")
     void confirm_timeout_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
@@ -267,12 +267,12 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("스케줄 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
-    void confirm_whenScheduleCompleteFails_keepsPaymentSuccess() {
+    @DisplayName("Booking 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
+    void confirm_whenBookingCompleteFails_keepsPaymentSuccess() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
-        givenFailureWhenScheduleComplete(command.orderId());
+        givenFailureWhenBookingComplete(command.orderId());
 
         PaymentConfirmResult result = paymentService.confirm(command);
 
@@ -285,7 +285,7 @@ class PaymentServiceTest {
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
-    private void givenFailureWhenScheduleComplete(String orderId) {
+    private void givenFailureWhenBookingComplete(String orderId) {
         org.mockito.Mockito.doThrow(new IllegalStateException("invalid booking status"))
                 .when(bookingCommandService)
                 .completePayment(orderId);
@@ -366,7 +366,7 @@ class PaymentServiceTest {
         );
     }
 
-    private Booking paymentPendingSchedule() {
+    private Booking paymentPendingBooking() {
         return Booking.builder()
                 .id("booking-001")
                 .status(BookingStatus.PAYMENT_PENDING)
