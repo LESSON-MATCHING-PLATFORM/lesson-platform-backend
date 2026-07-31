@@ -1,7 +1,7 @@
 package com.kosa.fillinv.schedule.controller;
 
-import com.kosa.fillinv.calendar.service.CalendarScheduleReadService;
-import com.kosa.fillinv.calendar.service.dto.CalendarScheduleSearchCondition;
+import com.kosa.fillinv.schedule.service.ScheduleReadService;
+import com.kosa.fillinv.schedule.service.dto.ScheduleSearchCondition;
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.global.response.SuccessResponse;
@@ -35,7 +35,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 public class ScheduleController {
 
     private final BookingCommandService bookingCommandService;
-    private final CalendarScheduleReadService calendarScheduleReadService;
+    private final ScheduleReadService scheduleReadService;
 
     // 스케쥴 생성
     @PostMapping
@@ -70,7 +70,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        ScheduleDetailResponse response = calendarScheduleReadService.getScheduleDetail(memberId, scheduleId, scheduleTimeId);
+        ScheduleDetailResponse response = scheduleReadService.getScheduleDetail(memberId, scheduleId, scheduleTimeId);
 
         return ResponseEntity
                 .ok(SuccessResponse.success(HttpStatus.OK, response));
@@ -88,9 +88,9 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = calendarScheduleReadService.searchUpcomingSchedules(
+        Page<ScheduleListResponse> responses = scheduleReadService.searchUpcomingSchedules(
                 memberId,
-                CalendarScheduleSearchCondition.builder()
+                ScheduleSearchCondition.builder()
                         .from(from)
                         .keyword(keyword)
                         .status(status)
@@ -114,9 +114,9 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = calendarScheduleReadService.searchPastSchedules(
+        Page<ScheduleListResponse> responses = scheduleReadService.searchPastSchedules(
                 memberId,
-                CalendarScheduleSearchCondition.builder()
+                ScheduleSearchCondition.builder()
                         .to(to)
                         .keyword(keyword)
                         .status(status)
@@ -130,7 +130,7 @@ public class ScheduleController {
 
     // 캘린더 / 스케쥴 전체 조회 (GET) - 시간순 정렬 (특정 날짜 위주)
     @GetMapping("/calendar")
-    public ResponseEntity<SuccessResponse<Page<ScheduleListResponse>>> calendarSchedules(
+    public ResponseEntity<SuccessResponse<Page<ScheduleListResponse>>> getSchedulesBetween(
             @AuthenticationPrincipal CustomMemberDetails customMemberDetails, // 로그인한 사용자 ID
             @RequestParam Instant start,
             @RequestParam Instant end,
@@ -139,7 +139,7 @@ public class ScheduleController {
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = calendarScheduleReadService.calendar(
+        Page<ScheduleListResponse> responses = scheduleReadService.searchSchedulesBetween(
                 memberId,
                 start,
                 end,
@@ -155,11 +155,11 @@ public class ScheduleController {
     @GetMapping("/search")
     public ResponseEntity<SuccessResponse<Page<ScheduleListResponse>>> searchSchedules(
             @AuthenticationPrincipal CustomMemberDetails customMemberDetails, // 로그인한 사용자 ID
-            @ModelAttribute CalendarScheduleSearchCondition condition
+            @ModelAttribute ScheduleSearchCondition condition
     ) {
         String memberId = customMemberDetails.memberId();
 
-        Page<ScheduleListResponse> responses = calendarScheduleReadService.search(condition.withMemberId(memberId));
+        Page<ScheduleListResponse> responses = scheduleReadService.search(condition.withMemberId(memberId));
 
         return ResponseEntity
                 .ok(SuccessResponse.success(HttpStatus.OK, responses));

@@ -1,4 +1,4 @@
-package com.kosa.fillinv.calendar.repository;
+package com.kosa.fillinv.schedule.repository;
 
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
@@ -13,7 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-public class CalendarScheduleSpecifications {
+public class ScheduleTimeSpecifications {
 
     public static Specification<ScheduleTime> search(
             String keyword,

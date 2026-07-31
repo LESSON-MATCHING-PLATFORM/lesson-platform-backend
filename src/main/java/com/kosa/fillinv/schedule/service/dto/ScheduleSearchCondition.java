@@ -1,4 +1,4 @@
-package com.kosa.fillinv.calendar.service.dto;
+package com.kosa.fillinv.schedule.service.dto;
 
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
@@ -8,21 +8,21 @@ import lombok.With;
 import java.time.Instant;
 
 @Builder(toBuilder = true)
-public record CalendarScheduleSearchCondition(
+public record ScheduleSearchCondition(
         @With String keyword,
         @With ScheduleStatus status,
         @With Instant from,
         @With Instant to,
-        @With CalendarScheduleSortType sortType,
+        @With ScheduleSortType sortType,
         @With String memberId,
         @With ScheduleParticipantRole participantRole,
         @With Integer page,
         @With Integer size
 ) {
 
-    public CalendarScheduleSearchCondition {
+    public ScheduleSearchCondition {
         if (sortType == null) {
-            sortType = CalendarScheduleSortType.START_TIME_ASC;
+            sortType = ScheduleSortType.START_TIME_ASC;
         }
         if (page == null || page < 0) {
             page = 0;
@@ -32,46 +32,46 @@ public record CalendarScheduleSearchCondition(
         }
     }
 
-    public static CalendarScheduleSearchCondition defaultCondition() {
-        return CalendarScheduleSearchCondition.builder().build();
+    public static ScheduleSearchCondition defaultCondition() {
+        return ScheduleSearchCondition.builder().build();
     }
 
-    public CalendarScheduleSearchCondition toPast(Instant to) {
+    public ScheduleSearchCondition toPast(Instant to) {
         return this.toBuilder()
                 .to(to)
-                .sortType(CalendarScheduleSortType.START_TIME_DESC)
+                .sortType(ScheduleSortType.START_TIME_DESC)
                 .build();
     }
 
-    public CalendarScheduleSearchCondition toIntended(Instant from) {
+    public ScheduleSearchCondition toIntended(Instant from) {
         return this.toBuilder()
                 .from(from)
-                .sortType(CalendarScheduleSortType.START_TIME_ASC)
+                .sortType(ScheduleSortType.START_TIME_ASC)
                 .build();
     }
 
-    public CalendarScheduleSearchCondition participate(String memberId) {
+    public ScheduleSearchCondition participate(String memberId) {
         return this.toBuilder()
                 .memberId(memberId)
                 .participantRole(ScheduleParticipantRole.BOTH)
                 .build();
     }
 
-    public CalendarScheduleSearchCondition mentee(String memberId) {
+    public ScheduleSearchCondition mentee(String memberId) {
         return this.toBuilder()
                 .memberId(memberId)
                 .participantRole(ScheduleParticipantRole.MENTEE)
                 .build();
     }
 
-    public CalendarScheduleSearchCondition mentor(String memberId) {
+    public ScheduleSearchCondition mentor(String memberId) {
         return this.toBuilder()
                 .memberId(memberId)
                 .participantRole(ScheduleParticipantRole.MENTOR)
                 .build();
     }
 
-    public CalendarScheduleSearchCondition between(Instant start, Instant end) {
+    public ScheduleSearchCondition between(Instant start, Instant end) {
         return this.toBuilder()
                 .from(start)
                 .to(end)
