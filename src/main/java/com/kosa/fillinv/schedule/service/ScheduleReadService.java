@@ -13,7 +13,6 @@ import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleListResponse;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
-import com.kosa.fillinv.booking.service.BookingValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -34,7 +33,7 @@ public class ScheduleReadService {
 
     private final BookingSessionRepository bookingSessionRepository;
     private final MemberService memberService;
-    private final BookingValidator validator;
+    private final ScheduleReadValidator validator;
 
     public ScheduleDetailResponse getScheduleDetail(String memberId, String bookingId, String scheduleTimeId) {
         Booking booking = validator.getBooking(bookingId);
@@ -45,7 +44,10 @@ public class ScheduleReadService {
         }
 
         String mentorNickname = booking.getMentorNickname();
-        String menteeNickname = validator.getNickname(booking.getMenteeId());
+        String menteeNickname = memberService
+                .getAllProfilesByMemberIds(Set.of(booking.getMenteeId()))
+                .get(booking.getMenteeId())
+                .nickname();
 
         return ScheduleDetailResponse.from(
                 booking,
