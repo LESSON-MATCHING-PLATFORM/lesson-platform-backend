@@ -9,7 +9,7 @@ import com.kosa.fillinv.lesson.entity.LessonType;
 import com.kosa.fillinv.lesson.entity.Option;
 import com.kosa.fillinv.lesson.repository.AvailableTimeRepository;
 import com.kosa.fillinv.member.entity.Member;
-import com.kosa.fillinv.schedule.dto.request.ScheduleCreateRequest;
+import com.kosa.fillinv.schedule.dto.request.BookingCreateRequest;
 import com.kosa.fillinv.schedule.entity.BookingCancelReason;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
@@ -27,22 +27,21 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional
-@RequiredArgsConstructor // final이 붙은 필드의 생성자를 자동으로 생성
-public class ScheduleCommandService { // 스케줄 생성 서비스
+@RequiredArgsConstructor
+public class BookingCommandService {
 
-    private final ScheduleValidator validator;
+    private final BookingValidator validator;
     private final ScheduleRepository scheduleRepository;
     private final AvailableTimeRepository availableTimeRepository;
     private final BookingStockService bookingStockService;
 
-    // ------- Public API - 외부 호출 핵심 메서드
-    public String createSchedule(String memberId, ScheduleCreateRequest request) { // 스케쥴 생성
+    public String createBooking(String memberId, BookingCreateRequest request) {
         Lesson lesson = validator.getLesson(request.lessonId());
 
-        Schedule schedule = switch (lesson.getLessonType()) { // 레슨 유형에 따라 스케쥴 생성 방식 분기 (1:1 멘토링, 1:N 원데이, 1:N 스터디)
-            case MENTORING -> createMentoringSchedule(lesson, memberId, request);
-            case ONEDAY -> createOnedaySchedule(lesson, memberId, request);
-            case STUDY -> createStudySchedule(lesson, memberId);
+        Schedule schedule = switch (lesson.getLessonType()) {
+            case MENTORING -> createMentoringBooking(lesson, memberId, request);
+            case ONEDAY -> createOnedayBooking(lesson, memberId, request);
+            case STUDY -> createStudyBooking(lesson, memberId);
             default -> throw new BusinessException(ErrorCode.INVALID_LESSON_TYPE);
         };
 
@@ -138,15 +137,14 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
         }
     }
 
-    // ------- Private Method - 내부 보조 메서드 (비즈니스 로직)
-    private Schedule createMentoringSchedule( // 1:1 멘토링 스케쥴 생성
+    private Schedule createMentoringBooking(
             Lesson lesson,
             String memberId,
-            ScheduleCreateRequest request
+            BookingCreateRequest request
     ) {
         Option option = validator.getOption(request.optionId());
 
-        Schedule schedule = buildBaseSchedule(lesson, memberId, option, null, option.getPrice());
+        Schedule schedule = buildBaseBooking(lesson, memberId, option, null, option.getPrice());
 
         Instant startTime = request.startTime();
         Instant endTime = startTime.plus(option.getMinute(), ChronoUnit.MINUTES); // 옵션의 분 단위를 더해서 종료 시간 계산
@@ -158,14 +156,14 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
         return schedule;
     }
 
-    private Schedule createOnedaySchedule( // 1:N 원데이 스케쥴 생성
+    private Schedule createOnedayBooking(
             Lesson lesson,
             String memberId,
-            ScheduleCreateRequest request
+            BookingCreateRequest request
     ) {
         AvailableTime availableTime = validator.getAvailableTime(request.availableTimeId());
 
-        Schedule schedule = buildBaseSchedule(lesson, memberId, null, availableTime, availableTime.getPrice());
+        Schedule schedule = buildBaseBooking(lesson, memberId, null, availableTime, availableTime.getPrice());
 
         schedule.addScheduleTime(
                 ScheduleTime.of(
@@ -178,11 +176,11 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
         return schedule;
     }
 
-    private Schedule createStudySchedule( // 1:N 스터디 스케쥴 생성
+    private Schedule createStudyBooking(
             Lesson lesson,
             String memberId
     ) {
-        Schedule schedule = buildBaseSchedule(lesson, memberId, null, null, lesson.getPrice());
+        Schedule schedule = buildBaseBooking(lesson, memberId, null, null, lesson.getPrice());
 
         List<ScheduleTime> times = availableTimeRepository
                 .findAllByLessonId(lesson.getId())
@@ -193,12 +191,12 @@ public class ScheduleCommandService { // 스케줄 생성 서비스
         schedule.addScheduleTime(times);
         return schedule;
     }
-    public Schedule buildBaseSchedule( // 스케쥴 기본 정보 설정
-                                       Lesson lesson,
-                                       String memberId,
-                                       Option option,
-                                       AvailableTime availableTime,
-                                       Integer price
+    public Schedule buildBaseBooking(
+            Lesson lesson,
+            String memberId,
+            Option option,
+            AvailableTime availableTime,
+            Integer price
     ) {
         Category category = validator.getCategory(lesson.getCategoryId());
         Member mentor = validator.getMentor(lesson.getMentorId());

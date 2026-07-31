@@ -13,7 +13,7 @@ import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleTime;
 import com.kosa.fillinv.schedule.repository.ScheduleParticipantRole;
 import com.kosa.fillinv.schedule.repository.ScheduleTimeRepository;
-import com.kosa.fillinv.schedule.service.ScheduleValidator;
+import com.kosa.fillinv.schedule.service.BookingValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -34,7 +34,7 @@ public class CalendarScheduleReadService {
 
     private final ScheduleTimeRepository scheduleTimeRepository;
     private final MemberService memberService;
-    private final ScheduleValidator validator;
+    private final BookingValidator validator;
 
     public ScheduleDetailResponse getScheduleDetail(String memberId, String bookingId, String scheduleTimeId) {
         Schedule booking = validator.getSchedule(bookingId);

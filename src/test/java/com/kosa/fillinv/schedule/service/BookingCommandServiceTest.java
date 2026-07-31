@@ -17,7 +17,7 @@ import com.kosa.fillinv.lesson.entity.Option;
 import com.kosa.fillinv.lesson.repository.LessonRepository;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.member.repository.MemberRepository;
-import com.kosa.fillinv.schedule.dto.request.ScheduleCreateRequest;
+import com.kosa.fillinv.schedule.dto.request.BookingCreateRequest;
 import com.kosa.fillinv.schedule.entity.BookingCancelReason;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
@@ -47,10 +47,10 @@ import org.springframework.transaction.annotation.Transactional;
         "TOSS_SECRET_KEY=test-secret"
 })
 @Transactional
-class ScheduleCommandServiceTest {
+class BookingCommandServiceTest {
 
     @Autowired
-    private ScheduleCommandService scheduleCommandService;
+    private BookingCommandService bookingCommandService;
 
     @Autowired
     private LessonRepository lessonRepository;
@@ -97,7 +97,7 @@ class ScheduleCommandServiceTest {
         AvailableTime selectedAvailableTime = lesson.getAvailableTimeList().getFirst();
         Instant startTime = selectedAvailableTime.getStartTime();
 
-        ScheduleCreateRequest request = new ScheduleCreateRequest(
+        BookingCreateRequest request = new BookingCreateRequest(
                 lesson.getId(),
                 selectedOption.getId(),
                 selectedAvailableTime.getId(),
@@ -105,7 +105,7 @@ class ScheduleCommandServiceTest {
         );
 
         // when
-        String scheduleId = scheduleCommandService.createSchedule("mentee-1", request);
+        String scheduleId = bookingCommandService.createBooking("mentee-1", request);
         entityManager.flush();
         entityManager.clear();
 
@@ -143,7 +143,7 @@ class ScheduleCommandServiceTest {
         AvailableTime selectedAvailableTime = lesson.getAvailableTimeList().getFirst();
         Instant startTime = selectedAvailableTime.getStartTime();
 
-        ScheduleCreateRequest request = new ScheduleCreateRequest(
+        BookingCreateRequest request = new BookingCreateRequest(
                 lesson.getId(),
                 null,
                 selectedAvailableTime.getId(),
@@ -153,7 +153,7 @@ class ScheduleCommandServiceTest {
         when(stockRepository.decreaseQuantity(anyString())).thenReturn(1);
 
         // when
-        String scheduleId = scheduleCommandService.createSchedule("mentee-2", request);
+        String scheduleId = bookingCommandService.createBooking("mentee-2", request);
         entityManager.flush();
         entityManager.clear();
 
@@ -187,7 +187,7 @@ class ScheduleCommandServiceTest {
                 .build();
         lessonRepository.save(lesson);
 
-        ScheduleCreateRequest request = new ScheduleCreateRequest(
+        BookingCreateRequest request = new BookingCreateRequest(
                 lesson.getId(),
                 null,
                 null,
@@ -197,7 +197,7 @@ class ScheduleCommandServiceTest {
         when(stockRepository.decreaseQuantity(anyString())).thenReturn(1);
 
         // when
-        String scheduleId = scheduleCommandService.createSchedule("mentee-3", request);
+        String scheduleId = bookingCommandService.createBooking("mentee-3", request);
         entityManager.flush();
         entityManager.clear();
 
@@ -220,7 +220,7 @@ class ScheduleCommandServiceTest {
         scheduleRepository.save(schedule);
         doReturn(1).when(stockRepository).increaseQuantity("available-time-001");
 
-        scheduleCommandService.cancelByRefund(schedule.getId());
+        bookingCommandService.cancelByRefund(schedule.getId());
         entityManager.flush();
         entityManager.clear();
 
@@ -238,7 +238,7 @@ class ScheduleCommandServiceTest {
         scheduleRepository.save(schedule);
         doReturn(1).when(stockRepository).increaseQuantity("lesson-001");
 
-        scheduleCommandService.cancelByRefund(schedule.getId());
+        bookingCommandService.cancelByRefund(schedule.getId());
         entityManager.flush();
         entityManager.clear();
 
@@ -257,7 +257,7 @@ class ScheduleCommandServiceTest {
         schedule.cancel(BookingCancelReason.REFUND_COMPLETED);
         scheduleRepository.save(schedule);
 
-        scheduleCommandService.cancelByRefund(schedule.getId());
+        bookingCommandService.cancelByRefund(schedule.getId());
 
         verify(stockRepository, never()).increaseQuantity(anyString());
     }

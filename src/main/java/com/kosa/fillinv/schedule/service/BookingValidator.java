@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class ScheduleValidator {
+public class BookingValidator {
 
     private final ScheduleRepository scheduleRepository;
     private final LessonRepository lessonRepository;

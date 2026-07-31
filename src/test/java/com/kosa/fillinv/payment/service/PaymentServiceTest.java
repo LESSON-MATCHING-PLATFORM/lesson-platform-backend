@@ -19,7 +19,7 @@ import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.entity.ScheduleStatus;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.schedule.service.BookingCommandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,7 +58,7 @@ class PaymentServiceTest {
     private ScheduleRepository scheduleRepository;
 
     @Mock
-    private ScheduleCommandService scheduleService;
+    private BookingCommandService bookingCommandService;
 
     @Mock
     private PaymentOutboxService paymentOutboxService;
@@ -142,7 +142,7 @@ class PaymentServiceTest {
                 successResult(command).paymentExtraDetails(),
                 null
         ));
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
@@ -159,7 +159,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
         verify(tossPaymentClient, never()).confirm(any());
         verify(paymentUpdateService, never()).updateStatus(any());
-        verify(scheduleService, never()).completePayment(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -192,7 +192,7 @@ class PaymentServiceTest {
                 successResult(command).paymentExtraDetails(),
                 null
         ));
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
@@ -225,7 +225,7 @@ class PaymentServiceTest {
                 successResult(command).paymentExtraDetails(),
                 null
         ));
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
@@ -244,7 +244,7 @@ class PaymentServiceTest {
         PaymentStatusUpdateCommand failureCommand = lastPaymentUpdateCommand();
         assertThat(failureCommand.status()).isEqualTo(PaymentStatus.FAILURE);
         assertThat(failureCommand.failure().message()).isEqualTo("잔액 부족");
-        verify(scheduleService, never()).completePayment(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -262,7 +262,7 @@ class PaymentServiceTest {
 
         PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
         assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
-        verify(scheduleService, never()).completePayment(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -281,13 +281,13 @@ class PaymentServiceTest {
 
         PaymentStatusUpdateCommand lastCommand = lastPaymentUpdateCommand();
         assertThat(lastCommand.status()).isEqualTo(PaymentStatus.SUCCESS);
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
     private void givenFailureWhenScheduleComplete(String orderId) {
         org.mockito.Mockito.doThrow(new IllegalStateException("invalid schedule status"))
-                .when(scheduleService)
+                .when(bookingCommandService)
                 .completePayment(orderId);
     }
 

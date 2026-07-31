@@ -9,7 +9,7 @@ import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.schedule.service.BookingCommandService;
 import jakarta.persistence.PersistenceException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -54,7 +54,7 @@ class RefundProcessorTest {
     private TransactionTemplate transactionTemplate;
 
     @Mock
-    private ScheduleCommandService scheduleCommandService;
+    private BookingCommandService bookingCommandService;
 
     @InjectMocks
     private RefundProcessor refundProcessor;
@@ -89,7 +89,7 @@ class RefundProcessorTest {
                 eq("raw")
         );
         verify(paymentOutboxService).saveRefundCompletedEvent(eq(command), any());
-        verify(scheduleCommandService).cancelByRefund(command.orderId());
+        verify(bookingCommandService).cancelByRefund(command.orderId());
     }
 
     @Test
@@ -99,7 +99,7 @@ class RefundProcessorTest {
         when(tossPaymentClient.cancel(any()))
                 .thenReturn(successResult());
         doThrow(new IllegalStateException("booking cancel failed"))
-                .when(scheduleCommandService)
+                .when(bookingCommandService)
                 .cancelByRefund(command.orderId());
 
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
@@ -112,7 +112,7 @@ class RefundProcessorTest {
                 eq("raw")
         );
         verify(paymentOutboxService).saveRefundCompletedEvent(eq(command), any());
-        verify(scheduleCommandService).cancelByRefund(command.orderId());
+        verify(bookingCommandService).cancelByRefund(command.orderId());
         verify(refundStatusUpdateService, never()).updateStatusToFailure(any(), any(), any());
         verify(refundStatusUpdateService, never()).updateStatusToUnknown(any(), any(), any());
     }
@@ -134,7 +134,7 @@ class RefundProcessorTest {
         verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
         verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), eq(nextAttemptAt));
         verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
-        verify(scheduleCommandService, never()).cancelByRefund(any());
+        verify(bookingCommandService, never()).cancelByRefund(any());
     }
 
     @Test
@@ -154,7 +154,7 @@ class RefundProcessorTest {
         verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
         verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
         verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
-        verify(scheduleCommandService, never()).cancelByRefund(any());
+        verify(bookingCommandService, never()).cancelByRefund(any());
     }
 
     @Test

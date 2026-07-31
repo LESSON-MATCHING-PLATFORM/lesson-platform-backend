@@ -16,7 +16,7 @@ import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
 import com.kosa.fillinv.schedule.entity.Schedule;
 import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.schedule.service.BookingCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,7 +36,7 @@ public class PaymentService {
     private final TossPaymentClient tossPaymentClient;
     private final PaymentRepository paymentRepository;
     private final ScheduleRepository scheduleRepository;
-    private final ScheduleCommandService scheduleService;
+    private final BookingCommandService bookingCommandService;
     private final PaymentOutboxService paymentOutboxService;
     private final TransactionTemplate transactionTemplate;
 
@@ -183,7 +183,7 @@ public class PaymentService {
 
     private void completeSchedulePayment(String orderId) {
         try {
-            scheduleService.completePayment(orderId);
+            bookingCommandService.completePayment(orderId);
         } catch (Exception e) {
             log.error("Payment confirmed, but schedule payment completion failed. orderId={}", orderId, e);
         }
