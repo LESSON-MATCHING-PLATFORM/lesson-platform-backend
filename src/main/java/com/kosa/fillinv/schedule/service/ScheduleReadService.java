@@ -8,7 +8,6 @@ import com.kosa.fillinv.schedule.service.dto.ScheduleSortType;
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.member.dto.profile.ProfileResponseDto;
-import com.kosa.fillinv.member.service.MemberService;
 import com.kosa.fillinv.schedule.dto.response.ScheduleDetailResponse;
 import com.kosa.fillinv.schedule.dto.response.ScheduleListResponse;
 import com.kosa.fillinv.booking.entity.Booking;
@@ -32,7 +31,7 @@ import java.util.stream.Stream;
 public class ScheduleReadService {
 
     private final BookingSessionRepository bookingSessionRepository;
-    private final MemberService memberService;
+    private final ScheduleParticipantProfileReader participantProfileReader;
     private final ScheduleReadValidator validator;
 
     public ScheduleDetailResponse getScheduleDetail(String memberId, String bookingId, String scheduleTimeId) {
@@ -44,10 +43,7 @@ public class ScheduleReadService {
         }
 
         String mentorNickname = booking.getMentorNickname();
-        String menteeNickname = memberService
-                .getAllProfilesByMemberIds(Set.of(booking.getMenteeId()))
-                .get(booking.getMenteeId())
-                .nickname();
+        String menteeNickname = participantProfileReader.getNickname(booking.getMenteeId());
 
         return ScheduleDetailResponse.from(
                 booking,
@@ -119,7 +115,7 @@ public class ScheduleReadService {
                         .filter(Objects::nonNull)
                         .collect(Collectors.toSet());
 
-        Map<String, ProfileResponseDto> members = memberService.getAllProfilesByMemberIds(memberIds);
+        Map<String, ProfileResponseDto> members = participantProfileReader.getProfiles(memberIds);
 
         return page.map(
                 session -> {

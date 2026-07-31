@@ -6,7 +6,6 @@ import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.lesson.entity.AvailableTime;
 import com.kosa.fillinv.lesson.entity.Lesson;
 import com.kosa.fillinv.lesson.entity.Option;
-import com.kosa.fillinv.lesson.repository.AvailableTimeRepository;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.booking.dto.request.BookingCreateRequest;
 import com.kosa.fillinv.booking.entity.BookingCancelReason;
@@ -29,13 +28,14 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class BookingCommandService {
 
-    private final BookingValidator validator;
+    private final BookingReader bookingReader;
+    private final BookingLessonReader bookingLessonReader;
+    private final BookingMemberReader bookingMemberReader;
     private final BookingRepository bookingRepository;
-    private final AvailableTimeRepository availableTimeRepository;
     private final BookingStockService bookingStockService;
 
     public String createBooking(String memberId, BookingCreateRequest request) {
-        Lesson lesson = validator.getLesson(request.lessonId());
+        Lesson lesson = bookingLessonReader.getLesson(request.lessonId());
 
         Booking booking = switch (lesson.getLessonType()) {
             case MENTORING -> createMentoringBooking(lesson, memberId, request);
@@ -54,7 +54,7 @@ public class BookingCommandService {
 
     @Transactional
     public void completePayment(String bookingId) {
-        Booking booking = validator.getBooking(bookingId);
+        Booking booking = bookingReader.getBooking(bookingId);
 
         // 결제 대기 상태인 스케쥴만 승인 대기로 상태 변경 가능
         if (booking.getStatus() != BookingStatus.PAYMENT_PENDING) {
@@ -67,7 +67,7 @@ public class BookingCommandService {
     // 멘토가 멘티의 레슨 수강신청을 승인했을 경우 (승인 대기 -> 승인)
     @Transactional
     public void approveLessonByMentor(String memberId, String bookingId) {
-        Booking booking = validator.getBooking(bookingId);
+        Booking booking = bookingReader.getBooking(bookingId);
 
         // 대기중인 스케줄 승인은 멘토만 가능
         booking.validateMentor(memberId);
@@ -84,7 +84,7 @@ public class BookingCommandService {
     // 멘토가 멘티의 레슨 수강신청을 거절했을 경우(승인 대기 -> 취소)
     @Transactional
     public void rejectLessonByMentor(String memberId, String bookingId) {
-        Booking booking = validator.getBooking(bookingId);
+        Booking booking = bookingReader.getBooking(bookingId);
 
         // 스케쥴 취소는 스케쥴 멘토만 가능
         booking.validateMentor(memberId);
@@ -99,7 +99,7 @@ public class BookingCommandService {
 
     @Transactional
     public void cancelByRefund(String bookingId) {
-        Booking booking = validator.getBooking(bookingId);
+        Booking booking = bookingReader.getBooking(bookingId);
 
         if (booking.getStatus() == BookingStatus.CANCELED) {
             return;
@@ -116,7 +116,7 @@ public class BookingCommandService {
     // 해당 레슨 수강이 모두 끝난 경우 (승인 -> 완료)
     @Transactional
     public void completeLesson(String memberId, String bookingId) {
-        Booking booking = validator.getBooking(bookingId);
+        Booking booking = bookingReader.getBooking(bookingId);
 
         // 스케쥴 완료는 멘티만 가능
         booking.validateMentee(memberId);
@@ -141,7 +141,7 @@ public class BookingCommandService {
             String memberId,
             BookingCreateRequest request
     ) {
-        Option option = validator.getOption(request.optionId());
+        Option option = bookingLessonReader.getOption(request.optionId());
 
         Booking booking = buildBaseBooking(lesson, memberId, option, null, option.getPrice());
 
@@ -160,7 +160,7 @@ public class BookingCommandService {
             String memberId,
             BookingCreateRequest request
     ) {
-        AvailableTime availableTime = validator.getAvailableTime(request.availableTimeId());
+        AvailableTime availableTime = bookingLessonReader.getAvailableTime(request.availableTimeId());
 
         Booking booking = buildBaseBooking(lesson, memberId, null, availableTime, availableTime.getPrice());
 
@@ -181,8 +181,8 @@ public class BookingCommandService {
     ) {
         Booking booking = buildBaseBooking(lesson, memberId, null, null, lesson.getPrice());
 
-        List<BookingSession> sessions = availableTimeRepository
-                .findAllByLessonId(lesson.getId())
+        List<BookingSession> sessions = bookingLessonReader
+                .getAvailableTimesByLessonId(lesson.getId())
                 .stream()
                 .map(at -> BookingSession.of(at.getStartTime(), at.getEndTime(), booking))
                 .toList();
@@ -197,8 +197,8 @@ public class BookingCommandService {
             AvailableTime availableTime,
             Integer price
     ) {
-        Category category = validator.getCategory(lesson.getCategoryId());
-        Member mentor = validator.getMentor(lesson.getMentorId());
+        Category category = bookingLessonReader.getCategory(lesson.getCategoryId());
+        Member mentor = bookingMemberReader.getMentor(lesson.getMentorId());
 
         return Booking.builder()
                 .id(UUID.randomUUID().toString())
