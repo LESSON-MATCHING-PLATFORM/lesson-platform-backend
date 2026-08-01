@@ -96,7 +96,9 @@ public class PaymentService {
                 return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
             }
 
-            markPaymentExecuting(command);
+            if (!markPaymentExecuting(command)) {
+                return handleConfirmExecutionAlreadyClaimed(command.orderId());
+            }
 
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
@@ -142,17 +144,16 @@ public class PaymentService {
                 .orElse(false);
     }
 
-    private void markPaymentExecuting(PaymentConfirmCommand command) {
-        transactionTemplate.execute(status -> {
-            paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
-                    command.paymentKey(),
-                    command.orderId(),
-                    PaymentStatus.EXECUTING,
-                    null,
-                    null
-            ));
-            return null;
-        });
+    private boolean markPaymentExecuting(PaymentConfirmCommand command) {
+        return Boolean.TRUE.equals(transactionTemplate.execute(status ->
+                paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
+                        command.paymentKey(),
+                        command.orderId(),
+                        PaymentStatus.EXECUTING,
+                        null,
+                        null
+                ))
+        ));
     }
 
     private void completePaymentSuccess(PaymentConfirmCommand command, PaymentExecutionResult result) {
@@ -192,6 +193,18 @@ public class PaymentService {
         } catch (Exception e) {
             log.error("Payment confirmed, but booking payment completion failed. orderId={}", orderId, e);
         }
+    }
+
+    private PaymentConfirmResult handleConfirmExecutionAlreadyClaimed(String orderId) {
+        Payment payment = paymentRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+
+        if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
+            completeBookingPayment(orderId);
+            return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
+        }
+
+        return new PaymentConfirmResult(payment.getPaymentStatus(), null);
     }
 
     private void validateCheckoutReady(Booking booking) {
