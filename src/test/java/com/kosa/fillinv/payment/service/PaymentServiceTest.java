@@ -78,6 +78,8 @@ class PaymentServiceTest {
                     TransactionCallback<?> callback = invocation.getArgument(0);
                     return callback.doInTransaction(null);
                 });
+        lenient().when(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .thenReturn(true);
     }
 
     @Test
@@ -145,7 +147,7 @@ class PaymentServiceTest {
         assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(result.failure()).isNull();
 
-        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+        verify(paymentUpdateService).tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 command.paymentKey(),
                 command.orderId(),
                 PaymentStatus.EXECUTING,
@@ -175,8 +177,28 @@ class PaymentServiceTest {
         assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(result.failure()).isNull();
         verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).tryMarkConfirmExecuting(any());
         verify(paymentUpdateService, never()).updateStatus(any());
         verify(bookingCommandService).completePayment(command.orderId());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
+    @DisplayName("다른 confirm 요청이 이미 EXECUTING 선점 중이면 Toss를 다시 호출하지 않고 후처리를 수행하지 않는다")
+    void confirm_whenPaymentExecutingByAnotherRequest_skipsTossConfirmAndSideEffects() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .willReturn(false);
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(executingPayment()));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.EXECUTING);
+        assertThat(result.failure()).isNull();
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -195,7 +217,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
 
         verify(tossPaymentClient).confirm(command);
-        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+        verify(paymentUpdateService).tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 command.paymentKey(),
                 command.orderId(),
                 PaymentStatus.EXECUTING,
@@ -228,7 +250,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
 
         verify(tossPaymentClient).confirm(command);
-        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+        verify(paymentUpdateService).tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 command.paymentKey(),
                 command.orderId(),
                 PaymentStatus.EXECUTING,
@@ -325,23 +347,26 @@ class PaymentServiceTest {
     }
 
     private Payment successPayment() {
-        Payment payment = payment();
-        payment.markExecuting();
+        Payment payment = executingPayment();
         payment.markSuccess();
         return payment;
     }
 
     private Payment failurePayment() {
-        Payment payment = payment();
-        payment.markExecuting();
+        Payment payment = executingPayment();
         payment.markFail();
         return payment;
     }
 
     private Payment unknownPayment() {
+        Payment payment = executingPayment();
+        payment.markUnknown();
+        return payment;
+    }
+
+    private Payment executingPayment() {
         Payment payment = payment();
         payment.markExecuting();
-        payment.markUnknown();
         return payment;
     }
 
