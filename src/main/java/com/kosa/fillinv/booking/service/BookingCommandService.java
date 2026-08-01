@@ -48,8 +48,7 @@ public class BookingCommandService {
 
         bookingStockService.reserve(saved);
 
-        bookingRepository.save(booking);
-        return booking.getId();
+        return saved.getId();
     }
 
     @Transactional
