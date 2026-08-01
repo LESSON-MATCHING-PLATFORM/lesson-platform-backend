@@ -65,6 +65,52 @@ class PaymentUpdateServiceTest {
     }
 
     @Test
+    @DisplayName("confirm EXECUTING 선점 성공 시 이력을 남기고 true를 반환한다")
+    void tryMarkConfirmExecuting_whenClaimSucceeded_savesHistoryAndReturnsTrue() {
+        Payment payment = payment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+        given(paymentRepository.markExecutingIfStatus(
+                payment.getOrderId(),
+                "payment-key-001",
+                PaymentStatus.NOT_STARTED
+        )).willReturn(1);
+
+        boolean result = paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
+                "payment-key-001",
+                payment.getOrderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+
+        PaymentHistory history = savedHistory();
+        assertThat(result).isTrue();
+        assertThat(history.getPreviousStatus()).isEqualTo(PaymentStatus.NOT_STARTED);
+        assertThat(history.getNewStatus()).isEqualTo(PaymentStatus.EXECUTING);
+        assertThat(history.getReason()).isEqualTo("PAYMENT_CONFIRMATION_START");
+    }
+
+    @Test
+    @DisplayName("confirm EXECUTING 선점 실패 시 이력을 남기지 않고 false를 반환한다")
+    void tryMarkConfirmExecuting_whenClaimFailed_returnsFalseWithoutHistory() {
+        Payment payment = executingPayment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+
+        boolean result = paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
+                "payment-key-001",
+                payment.getOrderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+
+        assertThat(result).isFalse();
+        verify(paymentHistoryRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("SUCCESS 변경 시 승인 상세 정보와 이력을 저장한다")
     void updateStatusToSuccess() {
         Payment payment = executingPayment();
