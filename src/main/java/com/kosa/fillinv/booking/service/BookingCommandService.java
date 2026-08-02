@@ -53,7 +53,7 @@ public class BookingCommandService {
 
     @Transactional
     public void completePayment(String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         // 결제 대기 상태인 Booking만 승인 대기로 상태 변경 가능
         if (booking.getStatus() != BookingStatus.PAYMENT_PENDING) {
@@ -66,7 +66,7 @@ public class BookingCommandService {
     // 멘토가 멘티의 레슨 수강신청을 승인했을 경우 (승인 대기 -> 승인)
     @Transactional
     public void approveLessonByMentor(String memberId, String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         // 대기 중인 Booking 승인은 멘토만 가능
         booking.validateMentor(memberId);
@@ -83,7 +83,7 @@ public class BookingCommandService {
     // 멘토가 멘티의 레슨 수강신청을 거절했을 경우(승인 대기 -> 취소)
     @Transactional
     public void rejectLessonByMentor(String memberId, String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         // Booking 취소는 해당 Booking의 멘토만 가능
         booking.validateMentor(memberId);
@@ -98,7 +98,7 @@ public class BookingCommandService {
 
     @Transactional
     public void cancelByRefund(String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         if (booking.getStatus() == BookingStatus.CANCELED) {
             return;
@@ -115,7 +115,7 @@ public class BookingCommandService {
     // 해당 레슨 수강이 모두 끝난 경우 (승인 -> 완료)
     @Transactional
     public void completeLesson(String memberId, String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         // Booking 완료는 멘티만 가능
         booking.validateMentee(memberId);

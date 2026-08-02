@@ -16,4 +16,9 @@ class BookingReader {
         return bookingRepository.findById(bookingId)
                 .orElseThrow(BookingException.BookingNotFound::new);
     }
+
+    Booking getBookingForUpdate(String bookingId) {
+        return bookingRepository.findByIdForUpdate(bookingId)
+                .orElseThrow(BookingException.BookingNotFound::new);
+    }
 }
