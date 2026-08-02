@@ -2,6 +2,7 @@ package com.kosa.fillinv.payment.outbox;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kosa.fillinv.global.exception.ResourceException;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.member.repository.MemberRepository;
 import com.kosa.fillinv.payment.domain.PSPConfirmationStatus;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -84,6 +86,41 @@ class PaymentOutboxServiceTest {
         assertThat(event.orderId()).isEqualTo(command.orderId());
         assertThat(event.timestamp()).isEqualTo(result.paymentExtraDetails().approvedAt().toString());
         assertThat(event.value()).isEqualTo(result.paymentExtraDetails().orderName());
+    }
+
+    @Test
+    @DisplayName("결제 완료 이벤트 저장 시 결제 정보가 없으면 예외를 던지고 Outbox를 저장하지 않는다")
+    void savePaymentCompletedEvent_whenPaymentNotFound_throwsNotFoundWithoutOutboxSave() {
+        PaymentConfirmCommand command = command();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> paymentOutboxService.savePaymentCompletedEvent(command, result(command)))
+                .isInstanceOf(ResourceException.NotFound.class)
+                .hasMessageContaining("결제 정보 없음");
+
+        verify(paymentOutboxRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("결제 완료 이벤트 저장 시 수신자 회원 정보가 없으면 buyerId를 userName fallback으로 사용한다")
+    void savePaymentCompletedEvent_whenRecipientMemberNotFound_usesBuyerIdAsUserName() throws Exception {
+        PaymentConfirmCommand command = command();
+        PaymentExecutionResult result = result(command);
+        String payload = "{\"action\":\"PAYMENT_COMPLETED\",\"user_name\":\"mentee-001\"}";
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
+        given(memberRepository.findById("mentee-001"))
+                .willReturn(Optional.empty());
+        given(objectMapper.writeValueAsString(any()))
+                .willReturn(payload);
+
+        paymentOutboxService.savePaymentCompletedEvent(command, result);
+
+        PaymentEvent event = serializedPaymentCompletedEvent();
+        assertThat(event.userId()).isEqualTo("mentee-001");
+        assertThat(event.userName()).isEqualTo("mentee-001");
+        assertThat(savedEvent().getPayload()).isEqualTo(payload);
     }
 
     @Test
