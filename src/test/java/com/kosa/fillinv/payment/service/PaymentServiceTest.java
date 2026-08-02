@@ -29,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
@@ -298,6 +299,33 @@ class PaymentServiceTest {
 
         assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
         assertThat(result.failure().errorCode()).isEqualTo("ResourceAccessException");
+
+        PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
+        assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
+    @DisplayName("Toss confirm 성공 후 DB 저장 실패 시 UNKNOWN으로 변경하고 Booking 후처리와 Outbox 저장은 수행하지 않는다")
+    void confirm_whenSuccessPersistenceFails_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    PaymentStatusUpdateCommand updateCommand = invocation.getArgument(0);
+                    if (updateCommand.status() == PaymentStatus.SUCCESS) {
+                        throw new DataAccessResourceFailureException("db down");
+                    }
+                    return null;
+                })
+                .when(paymentUpdateService)
+                .updateStatus(any());
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
 
         PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
         assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
