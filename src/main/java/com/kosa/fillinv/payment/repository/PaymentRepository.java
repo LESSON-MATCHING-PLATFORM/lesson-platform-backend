@@ -5,6 +5,7 @@ import com.kosa.fillinv.payment.entity.PaymentStatus;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -15,6 +16,21 @@ import java.util.Optional;
 @Repository
 public interface PaymentRepository extends JpaRepository<Payment, String> {
     Optional<Payment> findByOrderId(String s);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE Payment p
+            SET p.paymentStatus = :newStatus,
+                p.paymentKey = :paymentKey
+            WHERE p.orderId = :orderId
+            AND p.paymentStatus = :currentStatus
+            """)
+    int markExecutingIfStatus(
+            @Param("orderId") String orderId,
+            @Param("paymentKey") String paymentKey,
+            @Param("currentStatus") PaymentStatus currentStatus,
+            @Param("newStatus") PaymentStatus newStatus
+    );
 
     @Query("""
             SELECT p

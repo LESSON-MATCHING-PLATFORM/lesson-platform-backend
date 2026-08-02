@@ -22,7 +22,10 @@ import com.kosa.fillinv.booking.repository.BookingRepository;
 import com.kosa.fillinv.booking.service.BookingCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.persistence.PersistenceException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
@@ -96,7 +99,9 @@ public class PaymentService {
                 return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
             }
 
-            markPaymentExecuting(command);
+            if (!markPaymentExecuting(command)) {
+                return handleConfirmExecutionAlreadyClaimed(command.orderId());
+            }
 
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
@@ -120,7 +125,7 @@ public class PaymentService {
         if (e instanceof PSPConfirmationException) {
             status = ((PSPConfirmationException) e).paymentStatus();
             failure = new PaymentFailure(((PSPConfirmationException) e).getErrorCode(), e.getMessage());
-        } else if (e instanceof SQLException) { // Todo TOSS confirm api는 성공하고 내부 서버에서 상태 저장에 실패한 경우 (PaymentStatus.EXECUTING) 별도 처리 필요
+        } else if (isDatabaseFailure(e)) {
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else if (e instanceof ResourceAccessException) { // time out or network
@@ -136,23 +141,29 @@ public class PaymentService {
         return new PaymentConfirmResult(status, failure);
     }
 
+    private boolean isDatabaseFailure(Throwable e) {
+        return e instanceof SQLException ||
+                e instanceof DataAccessException ||
+                e instanceof TransactionException ||
+                e instanceof PersistenceException;
+    }
+
     private boolean isAlreadySucceeded(String orderId) {
         return paymentRepository.findByOrderId(orderId)
                 .map(payment -> payment.getPaymentStatus() == PaymentStatus.SUCCESS)
                 .orElse(false);
     }
 
-    private void markPaymentExecuting(PaymentConfirmCommand command) {
-        transactionTemplate.execute(status -> {
-            paymentUpdateService.updateStatus(new PaymentStatusUpdateCommand(
-                    command.paymentKey(),
-                    command.orderId(),
-                    PaymentStatus.EXECUTING,
-                    null,
-                    null
-            ));
-            return null;
-        });
+    private boolean markPaymentExecuting(PaymentConfirmCommand command) {
+        return Boolean.TRUE.equals(transactionTemplate.execute(status ->
+                paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
+                        command.paymentKey(),
+                        command.orderId(),
+                        PaymentStatus.EXECUTING,
+                        null,
+                        null
+                ))
+        ));
     }
 
     private void completePaymentSuccess(PaymentConfirmCommand command, PaymentExecutionResult result) {
@@ -172,6 +183,13 @@ public class PaymentService {
     }
 
     private void markPaymentFailedOrUnknown(PaymentConfirmCommand command, PaymentStatus status, PaymentFailure failure) {
+        if (status == PaymentStatus.UNKNOWN && isAlreadyRetryableFailureState(command.orderId())) {
+            log.warn("Skip UNKNOWN status re-recording for retryable payment state. orderId={}, failure={}",
+                    command.orderId(),
+                    failure);
+            return;
+        }
+
         transactionTemplate.execute(transactionStatus -> {
             paymentUpdateService.updateStatus(
                     new PaymentStatusUpdateCommand(
@@ -186,12 +204,31 @@ public class PaymentService {
         });
     }
 
+    private boolean isAlreadyRetryableFailureState(String orderId) {
+        return paymentRepository.findByOrderId(orderId)
+                .map(payment -> payment.getPaymentStatus() == PaymentStatus.FAILURE ||
+                        payment.getPaymentStatus() == PaymentStatus.UNKNOWN)
+                .orElse(false);
+    }
+
     private void completeBookingPayment(String orderId) {
         try {
             bookingCommandService.completePayment(orderId);
         } catch (Exception e) {
             log.error("Payment confirmed, but booking payment completion failed. orderId={}", orderId, e);
         }
+    }
+
+    private PaymentConfirmResult handleConfirmExecutionAlreadyClaimed(String orderId) {
+        Payment payment = paymentRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+
+        if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
+            completeBookingPayment(orderId);
+            return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
+        }
+
+        return new PaymentConfirmResult(payment.getPaymentStatus(), null);
     }
 
     private void validateCheckoutReady(Booking booking) {

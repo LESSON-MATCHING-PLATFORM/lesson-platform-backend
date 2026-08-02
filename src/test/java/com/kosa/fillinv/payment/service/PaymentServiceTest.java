@@ -29,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
@@ -78,6 +79,8 @@ class PaymentServiceTest {
                     TransactionCallback<?> callback = invocation.getArgument(0);
                     return callback.doInTransaction(null);
                 });
+        lenient().when(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .thenReturn(true);
     }
 
     @Test
@@ -145,7 +148,7 @@ class PaymentServiceTest {
         assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(result.failure()).isNull();
 
-        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+        verify(paymentUpdateService).tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 command.paymentKey(),
                 command.orderId(),
                 PaymentStatus.EXECUTING,
@@ -175,8 +178,28 @@ class PaymentServiceTest {
         assertThat(result.status()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(result.failure()).isNull();
         verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).tryMarkConfirmExecuting(any());
         verify(paymentUpdateService, never()).updateStatus(any());
         verify(bookingCommandService).completePayment(command.orderId());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
+    @DisplayName("다른 confirm 요청이 이미 EXECUTING 선점 중이면 Toss를 다시 호출하지 않고 후처리를 수행하지 않는다")
+    void confirm_whenPaymentExecutingByAnotherRequest_skipsTossConfirmAndSideEffects() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .willReturn(false);
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(executingPayment()));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.EXECUTING);
+        assertThat(result.failure()).isNull();
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -195,7 +218,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
 
         verify(tossPaymentClient).confirm(command);
-        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+        verify(paymentUpdateService).tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 command.paymentKey(),
                 command.orderId(),
                 PaymentStatus.EXECUTING,
@@ -228,7 +251,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
 
         verify(tossPaymentClient).confirm(command);
-        verify(paymentUpdateService).updateStatus(new PaymentStatusUpdateCommand(
+        verify(paymentUpdateService).tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 command.paymentKey(),
                 command.orderId(),
                 PaymentStatus.EXECUTING,
@@ -284,6 +307,71 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("Toss confirm 성공 후 DB 저장 실패 시 UNKNOWN으로 변경하고 Booking 후처리와 Outbox 저장은 수행하지 않는다")
+    void confirm_whenSuccessPersistenceFails_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    PaymentStatusUpdateCommand updateCommand = invocation.getArgument(0);
+                    if (updateCommand.status() == PaymentStatus.SUCCESS) {
+                        throw new DataAccessResourceFailureException("db down");
+                    }
+                    return null;
+                })
+                .when(paymentUpdateService)
+                .updateStatus(any());
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
+
+        PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
+        assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
+    @DisplayName("FAILURE 결제 재시도에서 EXECUTING 선점 중 DB 실패가 발생하면 기존 상태를 유지하고 UNKNOWN 결과를 반환한다")
+    void confirm_whenFailureRetryMarkExecutingFailsWithDatabaseError_returnsUnknownWithoutRerecording() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(failurePayment()));
+        given(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .willThrow(new DataAccessResourceFailureException("db down"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
+    @DisplayName("UNKNOWN 결제 재시도에서 EXECUTING 선점 중 DB 실패가 발생하면 기존 상태를 유지하고 UNKNOWN 결과를 반환한다")
+    void confirm_whenUnknownRetryMarkExecutingFailsWithDatabaseError_returnsUnknownWithoutRerecording() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(unknownPayment()));
+        given(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .willThrow(new DataAccessResourceFailureException("db down"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
     @DisplayName("Booking 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
     void confirm_whenBookingCompleteFails_keepsPaymentSuccess() {
         PaymentConfirmCommand command = confirmCommand();
@@ -325,23 +413,26 @@ class PaymentServiceTest {
     }
 
     private Payment successPayment() {
-        Payment payment = payment();
-        payment.markExecuting();
+        Payment payment = executingPayment();
         payment.markSuccess();
         return payment;
     }
 
     private Payment failurePayment() {
-        Payment payment = payment();
-        payment.markExecuting();
+        Payment payment = executingPayment();
         payment.markFail();
         return payment;
     }
 
     private Payment unknownPayment() {
+        Payment payment = executingPayment();
+        payment.markUnknown();
+        return payment;
+    }
+
+    private Payment executingPayment() {
         Payment payment = payment();
         payment.markExecuting();
-        payment.markUnknown();
         return payment;
     }
 

@@ -1,6 +1,7 @@
 package com.kosa.fillinv.payment.integration;
 
 import com.kosa.fillinv.payment.client.TossPaymentClient;
+import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.PSPConfirmationStatus;
 import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
 import com.kosa.fillinv.payment.domain.PaymentExtraDetails;
@@ -27,9 +28,17 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import org.springframework.web.client.ResourceAccessException;
 
 @SpringBootTest(properties = {
         "spring.datasource.driver-class-name=org.h2.Driver",
@@ -125,6 +134,99 @@ class PaymentOutboxIntegrationTest {
         assertThat(outboxEvents.getFirst().getEventType()).isEqualTo("PAYMENT_COMPLETED");
     }
 
+    @Test
+    @DisplayName("Toss 명확한 실패 시 Payment FAILURE와 실패 이력이 실제 DB에 저장되고 Outbox는 저장하지 않는다")
+    void confirmFailure_savesPaymentFailureAndHistoryWithoutOutbox() {
+        Payment payment = paymentRepository.save(payment());
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willThrow(pspFailure());
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        Payment savedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
+        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.FAILURE);
+        assertThat(result.failure().errorCode()).isEqualTo("REJECT_CARD_PAYMENT");
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.FAILURE);
+        assertThat(savedPayment.getPaymentKey()).isEqualTo(command.paymentKey());
+        assertThat(histories).extracting(PaymentHistory::getPreviousStatus)
+                .containsExactly(PaymentStatus.NOT_STARTED, PaymentStatus.EXECUTING);
+        assertThat(histories).extracting(PaymentHistory::getNewStatus)
+                .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.FAILURE);
+        assertThat(outboxEvents).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Toss 타임아웃 시 Payment UNKNOWN과 불명확 이력이 실제 DB에 저장되고 Outbox는 저장하지 않는다")
+    void confirmTimeout_savesPaymentUnknownAndHistoryWithoutOutbox() {
+        Payment payment = paymentRepository.save(payment());
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willThrow(new ResourceAccessException("timeout"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        Payment savedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
+        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("ResourceAccessException");
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(savedPayment.getPaymentKey()).isEqualTo(command.paymentKey());
+        assertThat(histories).extracting(PaymentHistory::getPreviousStatus)
+                .containsExactly(PaymentStatus.NOT_STARTED, PaymentStatus.EXECUTING);
+        assertThat(histories).extracting(PaymentHistory::getNewStatus)
+                .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.UNKNOWN);
+        assertThat(outboxEvents).isEmpty();
+    }
+
+    @Test
+    @DisplayName("중복 confirm 요청은 Toss 호출과 PaymentHistory, Outbox 저장을 중복 수행하지 않는다")
+    void confirmDuplicateRequest_claimsExecutionOnlyOnce() throws Exception {
+        Payment payment = paymentRepository.save(payment());
+        PaymentConfirmCommand command = confirmCommand();
+        CountDownLatch tossStarted = new CountDownLatch(1);
+        CountDownLatch releaseToss = new CountDownLatch(1);
+        given(tossPaymentClient.confirm(command))
+                .willAnswer(invocation -> {
+                    tossStarted.countDown();
+                    assertThat(releaseToss.await(5, TimeUnit.SECONDS)).isTrue();
+                    return successResult(command);
+                });
+
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        try {
+            Future<PaymentConfirmResult> firstResult = executorService.submit(() -> paymentService.confirm(command));
+            assertThat(tossStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            PaymentConfirmResult duplicateResult = paymentService.confirm(command);
+
+            assertThat(duplicateResult.status()).isEqualTo(PaymentStatus.EXECUTING);
+            assertThat(duplicateResult.failure()).isNull();
+
+            releaseToss.countDown();
+            assertThat(firstResult.get(5, TimeUnit.SECONDS).status()).isEqualTo(PaymentStatus.SUCCESS);
+        } finally {
+            releaseToss.countDown();
+            executorService.shutdownNow();
+            assertThat(executorService.awaitTermination(1, TimeUnit.SECONDS)).isTrue();
+        }
+
+        Payment savedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
+        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
+
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(histories).extracting(PaymentHistory::getNewStatus)
+                .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.SUCCESS);
+        assertThat(outboxEvents).hasSize(1);
+        verify(tossPaymentClient, times(1)).confirm(command);
+    }
+
     private Payment payment() {
         return Payment.builder()
                 .id("payment-001")
@@ -164,6 +266,17 @@ class PaymentOutboxIntegrationTest {
                         command.amount().longValue(),
                         "raw"
                 )
+        );
+    }
+
+    private PSPConfirmationException pspFailure() {
+        return new PSPConfirmationException(
+                "REJECT_CARD_PAYMENT",
+                "잔액 부족",
+                false,
+                true,
+                false,
+                false
         );
     }
 }

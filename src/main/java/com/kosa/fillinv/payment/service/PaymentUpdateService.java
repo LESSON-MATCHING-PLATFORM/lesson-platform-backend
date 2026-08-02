@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -42,6 +43,29 @@ public class PaymentUpdateService {
 
         PaymentHistory paymentHistory = createPaymentHistory(payment, previousStatus, PaymentStatus.EXECUTING, "PAYMENT_CONFIRMATION_START");
         paymentHistoryRepository.save(paymentHistory);
+    }
+
+    @Transactional
+    public boolean tryMarkConfirmExecuting(PaymentStatusUpdateCommand command) {
+        Payment payment = paymentRepository.findByOrderId(command.orderId())
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+        PaymentStatus currentStatus = payment.getPaymentStatus();
+
+        if (!isConfirmRetryable(currentStatus)) {
+            return false;
+        }
+
+        if (paymentRepository.markExecutingIfStatus(
+                command.orderId(),
+                command.paymentKey(),
+                currentStatus,
+                PaymentStatus.EXECUTING
+        ) == 1) {
+            saveConfirmStartHistory(payment, currentStatus);
+            return true;
+        }
+
+        return false;
     }
 
     @Transactional
@@ -94,6 +118,24 @@ public class PaymentUpdateService {
         payment.markUnknown();
 
         PaymentHistory paymentHistory = createPaymentHistory(payment, previousStatus, PaymentStatus.UNKNOWN, command.failure()==null? null : command.failure().toString());
+        paymentHistoryRepository.save(paymentHistory);
+    }
+
+    private boolean isConfirmRetryable(PaymentStatus status) {
+        return List.of(
+                PaymentStatus.NOT_STARTED,
+                PaymentStatus.FAILURE,
+                PaymentStatus.UNKNOWN
+        ).contains(status);
+    }
+
+    private void saveConfirmStartHistory(Payment payment, PaymentStatus previousStatus) {
+        PaymentHistory paymentHistory = createPaymentHistory(
+                payment,
+                previousStatus,
+                PaymentStatus.EXECUTING,
+                "PAYMENT_CONFIRMATION_START"
+        );
         paymentHistoryRepository.save(paymentHistory);
     }
 }
