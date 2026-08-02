@@ -3,8 +3,8 @@ package com.kosa.fillinv.payment.service;
 import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.repository.RefundRepository;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +31,7 @@ class RefundInternalStateRecoveryServiceTest {
     private RefundRepository refundRepository;
 
     @Mock
-    private ScheduleCommandService scheduleCommandService;
+    private BookingCommandService bookingCommandService;
 
     @InjectMocks
     private RefundInternalStateRecoveryService refundInternalStateRecoveryService;
@@ -46,7 +46,7 @@ class RefundInternalStateRecoveryServiceTest {
 
         verify(refundRepository).findRefundsPendingInternalStateRecovery(
                 eq(RefundStatus.SUCCESS),
-                eq(List.of(ScheduleStatus.APPROVAL_PENDING, ScheduleStatus.APPROVED)),
+                eq(List.of(BookingStatus.APPROVAL_PENDING, BookingStatus.APPROVED)),
                 any(Pageable.class)
         );
     }
@@ -60,7 +60,7 @@ class RefundInternalStateRecoveryServiceTest {
 
         refundInternalStateRecoveryService.recoverRefundInternalStates();
 
-        verify(scheduleCommandService).cancelByRefund("schedule-001");
+        verify(bookingCommandService).cancelByRefund("schedule-001");
     }
 
     @Test
@@ -71,13 +71,13 @@ class RefundInternalStateRecoveryServiceTest {
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of(first, second));
         doThrow(new IllegalStateException("cancel failed"))
-                .when(scheduleCommandService)
+                .when(bookingCommandService)
                 .cancelByRefund("schedule-001");
 
         refundInternalStateRecoveryService.recoverRefundInternalStates();
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(scheduleCommandService, times(2)).cancelByRefund(captor.capture());
+        verify(bookingCommandService, times(2)).cancelByRefund(captor.capture());
         assertThat(captor.getAllValues())
                 .containsExactly("schedule-001", "schedule-002");
     }

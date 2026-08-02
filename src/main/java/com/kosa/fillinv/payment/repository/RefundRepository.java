@@ -2,7 +2,7 @@ package com.kosa.fillinv.payment.repository;
 
 import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -29,7 +29,7 @@ public interface RefundRepository extends JpaRepository<Refund, String> {
 
     @Query("""
             select r
-            from Refund r, Schedule s
+            from Refund r, Booking s
             where r.orderId = s.id
               and r.refundStatus = :refundStatus
               and s.status in :scheduleStatuses
@@ -37,7 +37,7 @@ public interface RefundRepository extends JpaRepository<Refund, String> {
             """)
     List<Refund> findRefundsPendingInternalStateRecovery(
             @Param("refundStatus") RefundStatus refundStatus,
-            @Param("scheduleStatuses") Collection<ScheduleStatus> scheduleStatuses,
+            @Param("scheduleStatuses") Collection<BookingStatus> scheduleStatuses,
             Pageable pageable
     );
 }
