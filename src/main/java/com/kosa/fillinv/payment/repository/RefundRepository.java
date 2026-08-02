@@ -29,15 +29,15 @@ public interface RefundRepository extends JpaRepository<Refund, String> {
 
     @Query("""
             select r
-            from Refund r, Booking s
-            where r.orderId = s.id
+            from Refund r, Booking b
+            where r.orderId = b.id
               and r.refundStatus = :refundStatus
-              and s.status in :scheduleStatuses
+              and b.status in :bookingStatuses
             order by r.refundedAt asc, r.id asc
             """)
     List<Refund> findRefundsPendingInternalStateRecovery(
             @Param("refundStatus") RefundStatus refundStatus,
-            @Param("scheduleStatuses") Collection<BookingStatus> scheduleStatuses,
+            @Param("bookingStatuses") Collection<BookingStatus> bookingStatuses,
             Pageable pageable
     );
 }

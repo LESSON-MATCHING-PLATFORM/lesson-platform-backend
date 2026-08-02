@@ -37,8 +37,8 @@ class RefundInternalStateRecoveryServiceTest {
     private RefundInternalStateRecoveryService refundInternalStateRecoveryService;
 
     @Test
-    @DisplayName("Refund SUCCESS이고 Schedule이 취소 가능 상태인 항목을 조회한다")
-    void recoverRefundInternalStates_queriesSuccessfulRefundsWithCancelableSchedules() {
+    @DisplayName("Refund SUCCESS이고 Booking이 취소 가능 상태인 항목을 조회한다")
+    void recoverRefundInternalStates_queriesSuccessfulRefundsWithCancelableBookings() {
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of());
 
@@ -54,32 +54,32 @@ class RefundInternalStateRecoveryServiceTest {
     @Test
     @DisplayName("조회된 환불의 orderId로 Booking 환불 취소를 재처리한다")
     void recoverRefundInternalStates_cancelsBookingsByRefund() {
-        Refund refund = refund("refund-001", "schedule-001");
+        Refund refund = refund("refund-001", "booking-001");
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of(refund));
 
         refundInternalStateRecoveryService.recoverRefundInternalStates();
 
-        verify(bookingCommandService).cancelByRefund("schedule-001");
+        verify(bookingCommandService).cancelByRefund("booking-001");
     }
 
     @Test
     @DisplayName("한 항목의 재처리 실패가 나머지 항목 처리를 막지 않는다")
     void recoverRefundInternalStates_whenOneRecoveryFails_continuesRemainingRecoveries() {
-        Refund first = refund("refund-001", "schedule-001");
-        Refund second = refund("refund-002", "schedule-002");
+        Refund first = refund("refund-001", "booking-001");
+        Refund second = refund("refund-002", "booking-002");
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of(first, second));
         doThrow(new IllegalStateException("cancel failed"))
                 .when(bookingCommandService)
-                .cancelByRefund("schedule-001");
+                .cancelByRefund("booking-001");
 
         refundInternalStateRecoveryService.recoverRefundInternalStates();
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(bookingCommandService, times(2)).cancelByRefund(captor.capture());
         assertThat(captor.getAllValues())
-                .containsExactly("schedule-001", "schedule-002");
+                .containsExactly("booking-001", "booking-002");
     }
 
     private Refund refund(String refundId, String orderId) {
