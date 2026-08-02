@@ -73,7 +73,8 @@ class PaymentUpdateServiceTest {
         given(paymentRepository.markExecutingIfStatus(
                 payment.getOrderId(),
                 "payment-key-001",
-                PaymentStatus.NOT_STARTED
+                PaymentStatus.NOT_STARTED,
+                PaymentStatus.EXECUTING
         )).willReturn(1);
 
         boolean result = paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
@@ -97,6 +98,31 @@ class PaymentUpdateServiceTest {
         Payment payment = executingPayment();
         given(paymentRepository.findByOrderId(payment.getOrderId()))
                 .willReturn(Optional.of(payment));
+
+        boolean result = paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
+                "payment-key-001",
+                payment.getOrderId(),
+                PaymentStatus.EXECUTING,
+                null,
+                null
+        ));
+
+        assertThat(result).isFalse();
+        verify(paymentHistoryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("retryable 결제에서 confirm EXECUTING 선점 경합 패배 시 이력을 남기지 않고 false를 반환한다")
+    void tryMarkConfirmExecuting_whenRetryableClaimLost_returnsFalseWithoutHistory() {
+        Payment payment = payment();
+        given(paymentRepository.findByOrderId(payment.getOrderId()))
+                .willReturn(Optional.of(payment));
+        given(paymentRepository.markExecutingIfStatus(
+                payment.getOrderId(),
+                "payment-key-001",
+                PaymentStatus.NOT_STARTED,
+                PaymentStatus.EXECUTING
+        )).willReturn(0);
 
         boolean result = paymentUpdateService.tryMarkConfirmExecuting(new PaymentStatusUpdateCommand(
                 "payment-key-001",

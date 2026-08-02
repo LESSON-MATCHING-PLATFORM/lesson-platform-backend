@@ -20,7 +20,7 @@ public interface PaymentRepository extends JpaRepository<Payment, String> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             UPDATE Payment p
-            SET p.paymentStatus = com.kosa.fillinv.payment.entity.PaymentStatus.EXECUTING,
+            SET p.paymentStatus = :newStatus,
                 p.paymentKey = :paymentKey
             WHERE p.orderId = :orderId
             AND p.paymentStatus = :currentStatus
@@ -28,7 +28,8 @@ public interface PaymentRepository extends JpaRepository<Payment, String> {
     int markExecutingIfStatus(
             @Param("orderId") String orderId,
             @Param("paymentKey") String paymentKey,
-            @Param("currentStatus") PaymentStatus currentStatus
+            @Param("currentStatus") PaymentStatus currentStatus,
+            @Param("newStatus") PaymentStatus newStatus
     );
 
     @Query("""

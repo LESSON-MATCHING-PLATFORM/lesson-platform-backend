@@ -58,7 +58,8 @@ public class PaymentUpdateService {
         if (paymentRepository.markExecutingIfStatus(
                 command.orderId(),
                 command.paymentKey(),
-                currentStatus
+                currentStatus,
+                PaymentStatus.EXECUTING
         ) == 1) {
             saveConfirmStartHistory(payment, currentStatus);
             return true;

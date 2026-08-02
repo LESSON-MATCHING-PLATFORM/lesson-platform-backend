@@ -183,6 +183,13 @@ public class PaymentService {
     }
 
     private void markPaymentFailedOrUnknown(PaymentConfirmCommand command, PaymentStatus status, PaymentFailure failure) {
+        if (status == PaymentStatus.UNKNOWN && isAlreadyRetryableFailureState(command.orderId())) {
+            log.warn("Skip UNKNOWN status re-recording for retryable payment state. orderId={}, failure={}",
+                    command.orderId(),
+                    failure);
+            return;
+        }
+
         transactionTemplate.execute(transactionStatus -> {
             paymentUpdateService.updateStatus(
                     new PaymentStatusUpdateCommand(
@@ -195,6 +202,13 @@ public class PaymentService {
             );
             return null;
         });
+    }
+
+    private boolean isAlreadyRetryableFailureState(String orderId) {
+        return paymentRepository.findByOrderId(orderId)
+                .map(payment -> payment.getPaymentStatus() == PaymentStatus.FAILURE ||
+                        payment.getPaymentStatus() == PaymentStatus.UNKNOWN)
+                .orElse(false);
     }
 
     private void completeBookingPayment(String orderId) {

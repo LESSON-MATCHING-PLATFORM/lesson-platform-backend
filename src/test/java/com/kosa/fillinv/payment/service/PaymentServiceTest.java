@@ -334,6 +334,44 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("FAILURE 결제 재시도에서 EXECUTING 선점 중 DB 실패가 발생하면 기존 상태를 유지하고 UNKNOWN 결과를 반환한다")
+    void confirm_whenFailureRetryMarkExecutingFailsWithDatabaseError_returnsUnknownWithoutRerecording() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(failurePayment()));
+        given(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .willThrow(new DataAccessResourceFailureException("db down"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
+    @DisplayName("UNKNOWN 결제 재시도에서 EXECUTING 선점 중 DB 실패가 발생하면 기존 상태를 유지하고 UNKNOWN 결과를 반환한다")
+    void confirm_whenUnknownRetryMarkExecutingFailsWithDatabaseError_returnsUnknownWithoutRerecording() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(unknownPayment()));
+        given(paymentUpdateService.tryMarkConfirmExecuting(any()))
+                .willThrow(new DataAccessResourceFailureException("db down"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(paymentUpdateService, never()).updateStatus(any());
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
     @DisplayName("Booking 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
     void confirm_whenBookingCompleteFails_keepsPaymentSuccess() {
         PaymentConfirmCommand command = confirmCommand();
