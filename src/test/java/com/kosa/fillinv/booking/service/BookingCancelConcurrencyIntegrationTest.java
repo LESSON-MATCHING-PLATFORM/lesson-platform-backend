@@ -4,22 +4,23 @@ import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingCancelReason;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.booking.repository.BookingRepository;
+import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.stock.entity.Stock;
 import com.kosa.fillinv.stock.repository.StockRepository;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,6 +45,9 @@ class BookingCancelConcurrencyIntegrationTest {
     @Autowired
     private StockRepository stockRepository;
 
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
     @BeforeEach
     void setUp() {
         bookingRepository.deleteAll();
@@ -62,7 +66,14 @@ class BookingCancelConcurrencyIntegrationTest {
         bookingRepository.save(booking("booking-001", BookingStatus.APPROVAL_PENDING));
         stockRepository.save(stock("stock-001", "available-time-001", 3));
 
-        runConcurrently(2, () -> bookingCommandService.cancelByRefund("booking-001"));
+        runWithLockedBooking(
+                "booking-001",
+                lockedBooking -> {
+                    lockedBooking.cancel(BookingCancelReason.REFUND_COMPLETED);
+                    stockRepository.increaseQuantity("available-time-001");
+                },
+                () -> bookingCommandService.cancelByRefund("booking-001")
+        );
 
         Booking savedBooking = bookingRepository.findById("booking-001").orElseThrow();
         Stock savedStock = stockRepository.findById("stock-001").orElseThrow();
@@ -73,30 +84,101 @@ class BookingCancelConcurrencyIntegrationTest {
         assertThat(savedStock.getQuantity()).isEqualTo(4);
     }
 
-    private void runConcurrently(int threadCount, Runnable task) throws Exception {
-        ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch ready = new CountDownLatch(threadCount);
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<?>> futures = new ArrayList<>();
+    @Test
+    @DisplayName("환불 취소와 멘토 거절이 동시에 실행되어도 재고는 한 번만 복구된다")
+    void cancelByRefundAndRejectLesson_whenSameBookingCanceledConcurrently_restoresStockOnlyOnce() throws Exception {
+        bookingRepository.save(booking("booking-001", BookingStatus.APPROVAL_PENDING));
+        stockRepository.save(stock("stock-001", "available-time-001", 3));
 
-        for (int i = 0; i < threadCount; i++) {
-            futures.add(executorService.submit(() -> {
-                ready.countDown();
-                start.await();
-                task.run();
-                return null;
-            }));
+        runWithLockedBooking(
+                "booking-001",
+                lockedBooking -> {
+                    lockedBooking.cancel(BookingCancelReason.REFUND_COMPLETED);
+                    stockRepository.increaseQuantity("available-time-001");
+                },
+                () -> {
+                    try {
+                        bookingCommandService.rejectLessonByMentor("mentor-001", "booking-001");
+                    } catch (BusinessException ignored) {
+                    }
+                }
+        );
+
+        Booking savedBooking = bookingRepository.findById("booking-001").orElseThrow();
+        Stock savedStock = stockRepository.findById("stock-001").orElseThrow();
+
+        assertThat(savedBooking.getStatus()).isEqualTo(BookingStatus.CANCELED);
+        assertThat(savedBooking.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
+        assertThat(savedBooking.getCanceledAt()).isNotNull();
+        assertThat(savedStock.getQuantity()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("삭제된 Booking은 취소용 잠금 조회 대상에서 제외한다")
+    void findByIdForUpdate_whenBookingDeleted_returnsEmpty() {
+        Booking booking = booking("booking-001", BookingStatus.APPROVAL_PENDING);
+        booking.delete();
+        bookingRepository.save(booking);
+
+        Boolean found = transactionTemplate.execute(status ->
+                bookingRepository.findByIdForUpdate("booking-001").isPresent()
+        );
+
+        assertThat(found).isFalse();
+    }
+
+    private void runWithLockedBooking(
+            String bookingId,
+            Consumer<Booking> lockedAction,
+            Runnable competingAction
+    ) throws Exception {
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch competingStarted = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+
+        try {
+            Future<?> lockingFuture = executorService.submit(() -> {
+                transactionTemplate.executeWithoutResult(status -> {
+                    Booking lockedBooking = bookingRepository.findByIdForUpdate(bookingId).orElseThrow();
+                    lockAcquired.countDown();
+                    await(releaseLock);
+                    lockedAction.accept(lockedBooking);
+                });
+            });
+
+            assertThat(lockAcquired.await(1, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> competingFuture = executorService.submit(() -> {
+                competingStarted.countDown();
+                competingAction.run();
+            });
+
+            assertThat(competingStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(100);
+            assertThat(competingFuture.isDone()).isFalse();
+
+            releaseLock.countDown();
+
+            lockingFuture.get(5, TimeUnit.SECONDS);
+            competingFuture.get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            executorService.shutdownNow();
+            throw e;
+        } finally {
+            releaseLock.countDown();
+            executorService.shutdown();
+            assertThat(executorService.awaitTermination(Duration.ofSeconds(1).toMillis(), TimeUnit.MILLISECONDS)).isTrue();
         }
+    }
 
-        assertThat(ready.await(1, TimeUnit.SECONDS)).isTrue();
-        start.countDown();
-
-        for (Future<?> future : futures) {
-            future.get(5, TimeUnit.SECONDS);
+    private void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
         }
-
-        executorService.shutdown();
-        assertThat(executorService.awaitTermination(Duration.ofSeconds(1).toMillis(), TimeUnit.MILLISECONDS)).isTrue();
     }
 
     private Booking booking(String bookingId, BookingStatus status) {

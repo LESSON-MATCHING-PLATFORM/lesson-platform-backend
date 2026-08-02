@@ -30,7 +30,7 @@ public interface BookingRepository extends JpaRepository<Booking, String> {
     Page<Booking> findByStatus(BookingStatus status, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT b FROM Booking b WHERE b.id = :bookingId")
+    @Query("SELECT b FROM Booking b WHERE b.id = :bookingId AND b.deletedAt IS NULL")
     Optional<Booking> findByIdForUpdate(@Param("bookingId") String bookingId);
 
     @Query("SELECT new com.kosa.fillinv.review.dto.UnwrittenReviewVO(s.id, s.lessonTitle, s.lessonId, s.optionName, s.createdAt, m.nickname) " +
