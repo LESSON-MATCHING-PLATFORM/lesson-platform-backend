@@ -2,13 +2,19 @@ package com.kosa.fillinv.payment.outbox;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kosa.fillinv.global.exception.ResourceException;
+import com.kosa.fillinv.member.entity.Member;
+import com.kosa.fillinv.member.repository.MemberRepository;
 import com.kosa.fillinv.payment.domain.PaymentEvent;
 import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
 import com.kosa.fillinv.payment.domain.RefundCompletedEvent;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
+import com.kosa.fillinv.payment.entity.Payment;
+import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +22,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentOutboxService {
 
     static final String PAYMENT_COMPLETED = "PAYMENT_COMPLETED";
@@ -23,13 +30,20 @@ public class PaymentOutboxService {
     static final String PAYMENT_TOPIC = "payment-topic";
 
     private final PaymentOutboxRepository paymentOutboxRepository;
+    private final PaymentRepository paymentRepository;
+    private final MemberRepository memberRepository;
     private final ObjectMapper objectMapper;
 
     @Transactional
     public PaymentOutboxEvent savePaymentCompletedEvent(PaymentConfirmCommand command, PaymentExecutionResult result) {
+        Payment payment = paymentRepository.findByOrderId(command.orderId())
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+        String recipientId = payment.getBuyerId();
+        String recipientName = findRecipientName(recipientId);
+
         PaymentEvent event = new PaymentEvent(
-                null,
-                null,
+                recipientId,
+                recipientName,
                 PAYMENT_COMPLETED,
                 String.valueOf(command.amount()),
                 command.orderId(),
@@ -46,6 +60,15 @@ public class PaymentOutboxService {
                 .build();
 
         return paymentOutboxRepository.save(outboxEvent);
+    }
+
+    private String findRecipientName(String recipientId) {
+        return memberRepository.findById(recipientId)
+                .map(Member::getNickname)
+                .orElseGet(() -> {
+                    log.warn("Payment completed event recipient member not found. recipientId={}", recipientId);
+                    return recipientId;
+                });
     }
 
     @Transactional

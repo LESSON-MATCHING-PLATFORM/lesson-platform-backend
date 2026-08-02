@@ -2,7 +2,10 @@ package com.kosa.fillinv.payment.outbox;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kosa.fillinv.member.entity.Member;
+import com.kosa.fillinv.member.repository.MemberRepository;
 import com.kosa.fillinv.payment.domain.PSPConfirmationStatus;
+import com.kosa.fillinv.payment.domain.PaymentEvent;
 import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
 import com.kosa.fillinv.payment.domain.PaymentExtraDetails;
 import com.kosa.fillinv.payment.domain.PaymentMethod;
@@ -10,6 +13,8 @@ import com.kosa.fillinv.payment.domain.PaymentType;
 import com.kosa.fillinv.payment.domain.RefundCompletedEvent;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.domain.RefundExtraDetails;
+import com.kosa.fillinv.payment.entity.Payment;
+import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +26,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,6 +41,12 @@ class PaymentOutboxServiceTest {
     private PaymentOutboxRepository paymentOutboxRepository;
 
     @Mock
+    private PaymentRepository paymentRepository;
+
+    @Mock
+    private MemberRepository memberRepository;
+
+    @Mock
     private ObjectMapper objectMapper;
 
     @InjectMocks
@@ -46,6 +58,10 @@ class PaymentOutboxServiceTest {
         PaymentConfirmCommand command = command();
         PaymentExecutionResult result = result(command);
         String payload = "{\"action\":\"PAYMENT_COMPLETED\",\"order_id\":\"schedule-001\"}";
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
+        given(memberRepository.findById("mentee-001"))
+                .willReturn(Optional.of(member()));
         given(objectMapper.writeValueAsString(any()))
                 .willReturn(payload);
 
@@ -59,6 +75,15 @@ class PaymentOutboxServiceTest {
         assertThat(saved.getPayload()).isEqualTo(payload);
         assertThat(saved.getStatus()).isEqualTo(PaymentOutboxStatus.READY);
         assertThat(saved.getRetryCount()).isZero();
+
+        PaymentEvent event = serializedPaymentCompletedEvent();
+        assertThat(event.userId()).isEqualTo("mentee-001");
+        assertThat(event.userName()).isEqualTo("홍길동");
+        assertThat(event.action()).isEqualTo("PAYMENT_COMPLETED");
+        assertThat(event.amount()).isEqualTo(String.valueOf(command.amount()));
+        assertThat(event.orderId()).isEqualTo(command.orderId());
+        assertThat(event.timestamp()).isEqualTo(result.paymentExtraDetails().approvedAt().toString());
+        assertThat(event.value()).isEqualTo(result.paymentExtraDetails().orderName());
     }
 
     @Test
@@ -109,6 +134,10 @@ class PaymentOutboxServiceTest {
     @DisplayName("결제 완료 이벤트 직렬화 실패 시 예외를 던진다")
     void savePaymentCompletedEvent_whenSerializationFails() throws Exception {
         PaymentConfirmCommand command = command();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
+        given(memberRepository.findById("mentee-001"))
+                .willReturn(Optional.of(member()));
         given(objectMapper.writeValueAsString(any()))
                 .willThrow(new JsonProcessingException("boom") {
                 });
@@ -130,8 +159,35 @@ class PaymentOutboxServiceTest {
         return captor.getValue();
     }
 
+    private PaymentEvent serializedPaymentCompletedEvent() throws JsonProcessingException {
+        ArgumentCaptor<PaymentEvent> captor = ArgumentCaptor.forClass(PaymentEvent.class);
+        verify(objectMapper).writeValueAsString(captor.capture());
+        return captor.getValue();
+    }
+
     private PaymentConfirmCommand command() {
         return new PaymentConfirmCommand("payment-key-001", "schedule-001", 30000);
+    }
+
+    private Payment payment() {
+        return Payment.builder()
+                .id("payment-001")
+                .buyerId("mentee-001")
+                .sellerId("mentor-001")
+                .orderId("schedule-001")
+                .orderName("자바 멘토링 - 30분")
+                .amount(30000)
+                .build();
+    }
+
+    private Member member() {
+        return Member.builder()
+                .id("mentee-001")
+                .nickname("홍길동")
+                .phoneNum("01012345678")
+                .email("mentee@example.com")
+                .password("password")
+                .build();
     }
 
     private PGCancelCommand refundCommand() {
