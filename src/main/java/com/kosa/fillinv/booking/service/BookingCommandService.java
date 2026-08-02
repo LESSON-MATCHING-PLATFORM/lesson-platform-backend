@@ -83,7 +83,7 @@ public class BookingCommandService {
     // 멘토가 멘티의 레슨 수강신청을 거절했을 경우(승인 대기 -> 취소)
     @Transactional
     public void rejectLessonByMentor(String memberId, String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         // Booking 취소는 해당 Booking의 멘토만 가능
         booking.validateMentor(memberId);
@@ -98,7 +98,7 @@ public class BookingCommandService {
 
     @Transactional
     public void cancelByRefund(String bookingId) {
-        Booking booking = bookingReader.getBooking(bookingId);
+        Booking booking = bookingReader.getBookingForUpdate(bookingId);
 
         if (booking.getStatus() == BookingStatus.CANCELED) {
             return;
