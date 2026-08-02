@@ -35,7 +35,7 @@ class LessonReadServiceTest {
     private ReviewClient reviewClient;
     private StockClient stockClient;
     private CategoryService categoryService;
-    private ScheduleClient scheduleClient;
+    private BookingClient bookingClient;
 
     private LessonReadService lessonReadService;
 
@@ -46,9 +46,9 @@ class LessonReadServiceTest {
         reviewClient = mock(ReviewClient.class);
         stockClient = mock(StockClient.class);
         categoryService = mock(CategoryService.class);
-        scheduleClient = mock(ScheduleClient.class);
+        bookingClient = mock(BookingClient.class);
 
-        lessonReadService = new LessonReadService(lessonService, reviewClient, profileClient, stockClient, categoryService, scheduleClient);
+        lessonReadService = new LessonReadService(lessonService, reviewClient, profileClient, stockClient, categoryService, bookingClient);
     }
 
     @Test

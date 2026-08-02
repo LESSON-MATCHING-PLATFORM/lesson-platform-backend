@@ -1,6 +1,8 @@
 package com.kosa.fillinv.payment.service;
 
 import com.kosa.fillinv.global.exception.ResourceException;
+import com.kosa.fillinv.global.exception.BusinessException;
+import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
@@ -14,9 +16,10 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.repository.BookingRepository;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,21 +38,26 @@ public class PaymentService {
     private final PaymentUpdateService paymentUpdateService;
     private final TossPaymentClient tossPaymentClient;
     private final PaymentRepository paymentRepository;
-    private final ScheduleRepository scheduleRepository;
-    private final ScheduleCommandService scheduleService;
+    private final BookingRepository bookingRepository;
+    private final BookingCommandService bookingCommandService;
     private final PaymentOutboxService paymentOutboxService;
     private final TransactionTemplate transactionTemplate;
 
     /*
-     * 스케쥴에 대한 Payment 객체를 생성 및 데이터베이스에 저장
+     * Booking에 대한 Payment 객체를 생성 및 데이터베이스에 저장
      * Payment 객체를 통해서 이후 결제 과정에서 상태를 관리
      * */
     @Transactional
     public CheckoutResult checkout(CheckoutCommand command) {
 
-        String scheduleId = command.scheduleId();
+        String bookingId = command.scheduleId();
 
-        Payment existingPayment = paymentRepository.findByOrderId(scheduleId)
+        // 결제할 Booking 정보 조회
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceException.NotFound("Booking을 찾을 수 없습니다. bookingId: " + bookingId));
+        validateCheckoutReady(booking);
+
+        Payment existingPayment = paymentRepository.findByOrderId(bookingId)
                 .orElse(null);
         if (existingPayment != null) {
             return new CheckoutResult(
@@ -59,20 +67,16 @@ public class PaymentService {
             );
         }
 
-        // 결제할 스케쥴 정보 조회
-        Schedule schedule = scheduleRepository.findById(scheduleId)
-                .orElseThrow(() -> new ResourceException.NotFound("스케쥴을 찾을 수 없습니다. scheduleId: " + scheduleId));
-
-        Integer amount = schedule.getPrice();
-        String orderName = schedule.getLessonTitle() + (schedule.getOptionName() != null ? " - " + schedule.getOptionName() : "");
+        Integer amount = booking.getPrice();
+        String orderName = booking.getLessonTitle() + (booking.getOptionName() != null ? " - " + booking.getOptionName() : "");
 
         // 결제 준비
         Payment initPayment = Payment.builder()
                 .id(UUID.randomUUID().toString())
-                .orderId(scheduleId)
+                .orderId(bookingId)
                 .orderName(orderName)
-                .buyerId(schedule.getMenteeId())
-                .sellerId(schedule.getMentorId())
+                .buyerId(booking.getMenteeId())
+                .sellerId(booking.getMentorId())
                 .amount(amount)
                 .build();
 
@@ -88,6 +92,7 @@ public class PaymentService {
     public PaymentConfirmResult confirm(PaymentConfirmCommand command) {
         try {
             if (isAlreadySucceeded(command.orderId())) {
+                completeBookingPayment(command.orderId());
                 return new PaymentConfirmResult(PaymentStatus.SUCCESS, null);
             }
 
@@ -96,7 +101,7 @@ public class PaymentService {
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
             completePaymentSuccess(command, result);
-            completeSchedulePayment(command.orderId());
+            completeBookingPayment(command.orderId());
 
             return new PaymentConfirmResult(
                     PaymentStatus.SUCCESS,
@@ -181,11 +186,17 @@ public class PaymentService {
         });
     }
 
-    private void completeSchedulePayment(String orderId) {
+    private void completeBookingPayment(String orderId) {
         try {
-            scheduleService.completePayment(orderId);
+            bookingCommandService.completePayment(orderId);
         } catch (Exception e) {
-            log.error("Payment confirmed, but schedule payment completion failed. orderId={}", orderId, e);
+            log.error("Payment confirmed, but booking payment completion failed. orderId={}", orderId, e);
+        }
+    }
+
+    private void validateCheckoutReady(Booking booking) {
+        if (booking.getStatus() != BookingStatus.PAYMENT_PENDING) {
+            throw new BusinessException(ErrorCode.INVALID_SCHEDULE_STATUS);
         }
     }
 }

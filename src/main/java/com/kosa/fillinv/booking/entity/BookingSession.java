@@ -1,4 +1,4 @@
-package com.kosa.fillinv.schedule.entity;
+package com.kosa.fillinv.booking.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -14,7 +14,7 @@ import java.util.UUID;
 @Getter
 @NoArgsConstructor(access = lombok.AccessLevel.PROTECTED)
 @AllArgsConstructor
-public class ScheduleTime {
+public class BookingSession {
 
     @Id
     @Column(name = "schedule_time_id", nullable = false)
@@ -29,9 +29,9 @@ public class ScheduleTime {
     @ManyToOne
     @Setter
     @JoinColumn(name = "schedule_id", nullable = false)
-    private Schedule schedule;
+    private Booking booking;
 
-    public static ScheduleTime of(Instant startTime, Instant endTime, Schedule schedule) {
-        return new ScheduleTime(UUID.randomUUID().toString(), startTime, endTime, schedule);
+    public static BookingSession of(Instant startTime, Instant endTime, Booking booking) {
+        return new BookingSession(UUID.randomUUID().toString(), startTime, endTime, booking);
     }
 }

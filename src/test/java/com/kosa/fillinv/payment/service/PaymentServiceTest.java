@@ -1,5 +1,6 @@
 package com.kosa.fillinv.payment.service;
 
+import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
@@ -16,10 +17,10 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.repository.BookingRepository;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
@@ -55,10 +57,10 @@ class PaymentServiceTest {
     private PaymentRepository paymentRepository;
 
     @Mock
-    private ScheduleRepository scheduleRepository;
+    private BookingRepository bookingRepository;
 
     @Mock
-    private ScheduleCommandService scheduleService;
+    private BookingCommandService bookingCommandService;
 
     @Mock
     private PaymentOutboxService paymentOutboxService;
@@ -79,23 +81,23 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("checkout 시 스케줄 스냅샷으로 Payment를 생성한다")
-    void checkout_createsPaymentFromScheduleSnapshot() {
-        Schedule schedule = paymentPendingSchedule();
-        given(scheduleRepository.findById(schedule.getId()))
-                .willReturn(Optional.of(schedule));
+    @DisplayName("checkout 시 Booking 스냅샷으로 Payment를 생성한다")
+    void checkout_createsPaymentFromBookingSnapshot() {
+        Booking booking = paymentPendingBooking();
+        given(bookingRepository.findById(booking.getId()))
+                .willReturn(Optional.of(booking));
 
-        CheckoutResult result = paymentService.checkout(new CheckoutCommand(schedule.getId()));
+        CheckoutResult result = paymentService.checkout(new CheckoutCommand(booking.getId()));
 
         Payment savedPayment = savedPayment();
-        assertThat(savedPayment.getOrderId()).isEqualTo(schedule.getId());
+        assertThat(savedPayment.getOrderId()).isEqualTo(booking.getId());
         assertThat(savedPayment.getOrderName()).isEqualTo("자바 멘토링 - 30분");
-        assertThat(savedPayment.getBuyerId()).isEqualTo(schedule.getMenteeId());
-        assertThat(savedPayment.getSellerId()).isEqualTo(schedule.getMentorId());
-        assertThat(savedPayment.getAmount()).isEqualTo(schedule.getPrice());
+        assertThat(savedPayment.getBuyerId()).isEqualTo(booking.getMenteeId());
+        assertThat(savedPayment.getSellerId()).isEqualTo(booking.getMentorId());
+        assertThat(savedPayment.getAmount()).isEqualTo(booking.getPrice());
         assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.NOT_STARTED);
 
-        assertThat(result.orderId()).isEqualTo(schedule.getId());
+        assertThat(result.orderId()).isEqualTo(booking.getId());
         assertThat(result.orderName()).isEqualTo(savedPayment.getOrderName());
         assertThat(result.amount()).isEqualTo(savedPayment.getAmount());
     }
@@ -104,6 +106,8 @@ class PaymentServiceTest {
     @DisplayName("checkout 중복 요청 시 기존 Payment를 재사용하고 새로 저장하지 않는다")
     void checkout_whenPaymentAlreadyExists_reusesExistingPayment() {
         Payment existingPayment = payment();
+        given(bookingRepository.findById(existingPayment.getOrderId()))
+                .willReturn(Optional.of(paymentPendingBooking()));
         given(paymentRepository.findByOrderId(existingPayment.getOrderId()))
                 .willReturn(Optional.of(existingPayment));
 
@@ -112,13 +116,26 @@ class PaymentServiceTest {
         assertThat(result.orderId()).isEqualTo(existingPayment.getOrderId());
         assertThat(result.orderName()).isEqualTo(existingPayment.getOrderName());
         assertThat(result.amount()).isEqualTo(existingPayment.getAmount());
-        verify(scheduleRepository, never()).findById(any());
         verify(paymentRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("confirm 성공 시 결제를 SUCCESS로 변경하고 스케줄 결제 완료 처리를 호출한다")
-    void confirm_success_updatesPaymentAndCompletesSchedulePayment() {
+    @DisplayName("checkout 시 Booking이 결제 대기 상태가 아니면 Payment를 생성하지 않는다")
+    void checkout_whenBookingIsNotPaymentPending_throwsInvalidStatus() {
+        Booking booking = booking(BookingStatus.CANCELED);
+        given(bookingRepository.findById(booking.getId()))
+                .willReturn(Optional.of(booking));
+
+        assertThatThrownBy(() -> paymentService.checkout(new CheckoutCommand(booking.getId())))
+                .isInstanceOf(BusinessException.class);
+
+        verify(paymentRepository, never()).findByOrderId(any());
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("confirm 성공 시 결제를 SUCCESS로 변경하고 Booking 결제 완료 처리를 호출한다")
+    void confirm_success_updatesPaymentAndCompletesBookingPayment() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
@@ -142,13 +159,13 @@ class PaymentServiceTest {
                 successResult(command).paymentExtraDetails(),
                 null
         ));
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
     @Test
-    @DisplayName("이미 SUCCESS인 결제 confirm 요청은 Toss를 다시 호출하지 않고 성공으로 응답한다")
-    void confirm_whenPaymentAlreadySuccess_skipsTossConfirm() {
+    @DisplayName("이미 SUCCESS인 결제 confirm 요청은 Toss를 다시 호출하지 않고 Booking 완료를 재시도한다")
+    void confirm_whenPaymentAlreadySuccess_skipsTossConfirmAndRetriesBookingCompletion() {
         PaymentConfirmCommand command = confirmCommand();
         given(paymentRepository.findByOrderId(command.orderId()))
                 .willReturn(Optional.of(successPayment()));
@@ -159,7 +176,7 @@ class PaymentServiceTest {
         assertThat(result.failure()).isNull();
         verify(tossPaymentClient, never()).confirm(any());
         verify(paymentUpdateService, never()).updateStatus(any());
-        verify(scheduleService, never()).completePayment(any());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
@@ -192,7 +209,7 @@ class PaymentServiceTest {
                 successResult(command).paymentExtraDetails(),
                 null
         ));
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
@@ -225,12 +242,12 @@ class PaymentServiceTest {
                 successResult(command).paymentExtraDetails(),
                 null
         ));
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
     @Test
-    @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 스케줄은 변경하지 않는다")
+    @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 Booking은 변경하지 않는다")
     void confirm_failure_updatesPaymentFailureOnly() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
@@ -244,12 +261,12 @@ class PaymentServiceTest {
         PaymentStatusUpdateCommand failureCommand = lastPaymentUpdateCommand();
         assertThat(failureCommand.status()).isEqualTo(PaymentStatus.FAILURE);
         assertThat(failureCommand.failure().message()).isEqualTo("잔액 부족");
-        verify(scheduleService, never()).completePayment(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
     @Test
-    @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 스케줄은 변경하지 않는다")
+    @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 Booking은 변경하지 않는다")
     void confirm_timeout_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
@@ -262,17 +279,17 @@ class PaymentServiceTest {
 
         PaymentStatusUpdateCommand unknownCommand = lastPaymentUpdateCommand();
         assertThat(unknownCommand.status()).isEqualTo(PaymentStatus.UNKNOWN);
-        verify(scheduleService, never()).completePayment(any());
+        verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
     @Test
-    @DisplayName("스케줄 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
-    void confirm_whenScheduleCompleteFails_keepsPaymentSuccess() {
+    @DisplayName("Booking 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
+    void confirm_whenBookingCompleteFails_keepsPaymentSuccess() {
         PaymentConfirmCommand command = confirmCommand();
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
-        givenFailureWhenScheduleComplete(command.orderId());
+        givenFailureWhenBookingComplete(command.orderId());
 
         PaymentConfirmResult result = paymentService.confirm(command);
 
@@ -281,13 +298,13 @@ class PaymentServiceTest {
 
         PaymentStatusUpdateCommand lastCommand = lastPaymentUpdateCommand();
         assertThat(lastCommand.status()).isEqualTo(PaymentStatus.SUCCESS);
-        verify(scheduleService).completePayment(command.orderId());
+        verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
     }
 
-    private void givenFailureWhenScheduleComplete(String orderId) {
-        org.mockito.Mockito.doThrow(new IllegalStateException("invalid schedule status"))
-                .when(scheduleService)
+    private void givenFailureWhenBookingComplete(String orderId) {
+        org.mockito.Mockito.doThrow(new IllegalStateException("invalid booking status"))
+                .when(bookingCommandService)
                 .completePayment(orderId);
     }
 
@@ -304,7 +321,7 @@ class PaymentServiceTest {
     }
 
     private PaymentConfirmCommand confirmCommand() {
-        return new PaymentConfirmCommand("payment-key-001", "schedule-001", 30000);
+        return new PaymentConfirmCommand("payment-key-001", "booking-001", 30000);
     }
 
     private Payment successPayment() {
@@ -333,7 +350,7 @@ class PaymentServiceTest {
                 .id("payment-001")
                 .buyerId("mentee-001")
                 .sellerId("mentor-001")
-                .orderId("schedule-001")
+                .orderId("booking-001")
                 .orderName("자바 멘토링 - 30분")
                 .amount(30000)
                 .build();
@@ -366,10 +383,14 @@ class PaymentServiceTest {
         );
     }
 
-    private Schedule paymentPendingSchedule() {
-        return Schedule.builder()
-                .id("schedule-001")
-                .status(ScheduleStatus.PAYMENT_PENDING)
+    private Booking paymentPendingBooking() {
+        return booking(BookingStatus.PAYMENT_PENDING);
+    }
+
+    private Booking booking(BookingStatus status) {
+        return Booking.builder()
+                .id("booking-001")
+                .status(status)
                 .requestContent("멘토링 신청합니다")
                 .lessonTitle("자바 멘토링")
                 .lessonType("MENTORING")

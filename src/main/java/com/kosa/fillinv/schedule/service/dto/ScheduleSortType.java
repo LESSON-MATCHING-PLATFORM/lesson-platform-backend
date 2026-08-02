@@ -1,15 +1,14 @@
 package com.kosa.fillinv.schedule.service.dto;
 
+import com.kosa.fillinv.global.exception.BusinessException;
+import com.kosa.fillinv.global.response.ErrorCode;
 import lombok.Getter;
 import org.springframework.data.domain.Sort;
-
-import java.util.Arrays;
 
 @Getter
 public enum ScheduleSortType {
     START_TIME_ASC("startTime", Sort.Direction.ASC),
-    START_TIME_DESC("startTime", Sort.Direction.DESC)
-    ;
+    START_TIME_DESC("startTime", Sort.Direction.DESC);
 
     private final String property;
     private final Sort.Direction direction;
@@ -20,12 +19,15 @@ public enum ScheduleSortType {
     }
 
     public static ScheduleSortType from(String value) {
-        return Arrays.stream(values())
-                .filter(type -> type.name().equalsIgnoreCase(value))
-                .findFirst()
-                .orElseThrow(() ->
-                        new IllegalArgumentException("지원하지 않는 정렬 타입입니다: " + value)
-                );
+        if (value == null || value.isBlank()) {
+            return START_TIME_ASC;
+        }
+
+        try {
+            return ScheduleSortType.valueOf(value.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT, e);
+        }
     }
 
     public Sort toSort() {

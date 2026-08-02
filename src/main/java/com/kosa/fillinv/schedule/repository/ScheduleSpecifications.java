@@ -1,8 +1,8 @@
 package com.kosa.fillinv.schedule.repository;
 
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.entity.BookingStatus;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
@@ -12,58 +12,58 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ScheduleTimeSpecifications {
+public class ScheduleSpecifications {
 
-    public static Specification<ScheduleTime> search(
+    public static Specification<BookingSession> search(
             String keyword,
             Instant from,
             Instant to,
-            ScheduleStatus status,
+            BookingStatus status,
             String mentorId,
             String menteeId,
             ScheduleParticipantRole role
     ) {
         return Specification
-                .where(fetchSchedule())
+                .where(fetchBooking())
                 .and(lessonTitleContains(keyword))
                 .and(startTimeAfter(from))
                 .and(startTimeBefore(to))
-                .and(scheduleStatusEq(status))
+                .and(bookingStatusEq(status))
                 .and(participantEq(mentorId, menteeId, role));
     }
 
-    public static Specification<ScheduleTime> startTimeAfter(Instant from) {
+    public static Specification<BookingSession> startTimeAfter(Instant from) {
         return (root, query, cb) ->
                 from == null ? null : cb.greaterThanOrEqualTo(root.get("startTime"), from);
     }
 
-    public static Specification<ScheduleTime> startTimeBefore(Instant to) {
+    public static Specification<BookingSession> startTimeBefore(Instant to) {
         return (root, query, cb) ->
                 to == null ? null : cb.lessThanOrEqualTo(root.get("startTime"), to);
     }
 
-    public static Specification<ScheduleTime> scheduleStatusEq(ScheduleStatus status) {
+    public static Specification<BookingSession> bookingStatusEq(BookingStatus status) {
         return (root, query, cb) -> {
             if (status == null) return null;
 
-            Join<ScheduleTime, Schedule> schedule =
-                    root.join("schedule", JoinType.INNER);
+            Join<BookingSession, Booking> booking =
+                    root.join("booking", JoinType.INNER);
 
-            return cb.equal(schedule.get("status"), status);
+            return cb.equal(booking.get("status"), status);
         };
     }
 
-    public static Specification<ScheduleTime> fetchSchedule() {
+    public static Specification<BookingSession> fetchBooking() {
         return (root, query, cb) -> {
             if (query.getResultType() != Long.class) {
-                root.fetch("schedule", JoinType.INNER);
+                root.fetch("booking", JoinType.INNER);
                 query.distinct(true);
             }
             return null;
         };
     }
 
-    public static Specification<ScheduleTime> participantEq(
+    public static Specification<BookingSession> participantEq(
             String mentorId,
             String menteeId,
             ScheduleParticipantRole role
@@ -74,8 +74,8 @@ public class ScheduleTimeSpecifications {
                 return null;
             }
 
-            Join<ScheduleTime, Schedule> schedule =
-                    root.join("schedule", JoinType.INNER);
+            Join<BookingSession, Booking> booking =
+                    root.join("booking", JoinType.INNER);
 
             return switch (role) {
 
@@ -83,24 +83,24 @@ public class ScheduleTimeSpecifications {
                     if (mentorId == null) {
                         throw new IllegalArgumentException("MENTOR role requires mentorId");
                     }
-                    yield cb.equal(schedule.get("mentorId"), mentorId);
+                    yield cb.equal(booking.get("mentorId"), mentorId);
                 }
 
                 case MENTEE -> {
                     if (menteeId == null) {
                         throw new IllegalArgumentException("MENTEE role requires menteeId");
                     }
-                    yield cb.equal(schedule.get("menteeId"), menteeId);
+                    yield cb.equal(booking.get("menteeId"), menteeId);
                 }
 
                 case BOTH -> {
                     List<Predicate> predicates = new ArrayList<>();
 
                     if (mentorId != null) {
-                        predicates.add(cb.equal(schedule.get("mentorId"), mentorId));
+                        predicates.add(cb.equal(booking.get("mentorId"), mentorId));
                     }
                     if (menteeId != null) {
-                        predicates.add(cb.equal(schedule.get("menteeId"), menteeId));
+                        predicates.add(cb.equal(booking.get("menteeId"), menteeId));
                     }
 
                     if (predicates.isEmpty()) {
@@ -113,20 +113,19 @@ public class ScheduleTimeSpecifications {
         };
     }
 
-    public static Specification<ScheduleTime> lessonTitleContains(String keyword) {
+    public static Specification<BookingSession> lessonTitleContains(String keyword) {
         return (root, query, cb) -> {
             if (keyword == null || keyword.isBlank()) {
                 return null;
             }
 
-            Join<ScheduleTime, Schedule> schedule =
-                    root.join("schedule", JoinType.INNER);
+            Join<BookingSession, Booking> booking =
+                    root.join("booking", JoinType.INNER);
 
             return cb.like(
-                    cb.lower(schedule.get("lessonTitle")),
+                    cb.lower(booking.get("lessonTitle")),
                     "%" + keyword.toLowerCase() + "%"
             );
         };
     }
-
 }

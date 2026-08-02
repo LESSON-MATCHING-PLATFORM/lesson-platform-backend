@@ -37,7 +37,7 @@ public enum ErrorCode {
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "S03", "인증되지 않은 사용자입니다."),
     ACCESS_DENIED(FORBIDDEN, "S04", "접근 권한이 없습니다."),
 
-    // Schedule Error
+    // Booking/Schedule Error
     LESSON_NOT_FOUND(NOT_FOUND, "SCH01", "해당 레슨을 찾을 수 없습니다."),
     OPTION_NOT_FOUND(NOT_FOUND, "SCH02", "해당 옵션을 찾을 수 없습니다."),
     AVAILABLE_TIME_NOT_FOUND(NOT_FOUND, "SCH03", "선택한 시간대 정보를 찾을 수 없습니다"),

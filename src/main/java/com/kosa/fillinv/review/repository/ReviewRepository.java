@@ -34,7 +34,7 @@ public interface ReviewRepository extends JpaRepository<Review, String> {
     @Query("SELECT new com.kosa.fillinv.review.dto.MyReviewVO(" +
             "r, s.lessonTitle, s.optionName, s.createdAt, m.nickname) " +
             "FROM Review r " +
-            "JOIN r.schedule s " +
+            "JOIN r.booking s " +
             "JOIN Lesson l ON s.lessonId = l.id " +
             "JOIN Member m ON l.mentorId = m.id " +
             "WHERE r.writerId = :writerId")

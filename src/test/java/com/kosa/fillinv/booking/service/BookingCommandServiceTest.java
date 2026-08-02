@@ -1,6 +1,7 @@
-package com.kosa.fillinv.schedule.service;
+package com.kosa.fillinv.booking.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.kosa.fillinv.category.entity.Category;
 import com.kosa.fillinv.category.repository.CategoryRepository;
+import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.lesson.domain.LessonBuilder;
 import com.kosa.fillinv.lesson.entity.AvailableTime;
 import com.kosa.fillinv.lesson.entity.Lesson;
@@ -17,12 +19,12 @@ import com.kosa.fillinv.lesson.entity.Option;
 import com.kosa.fillinv.lesson.repository.LessonRepository;
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.member.repository.MemberRepository;
-import com.kosa.fillinv.schedule.dto.request.ScheduleCreateRequest;
-import com.kosa.fillinv.schedule.entity.BookingCancelReason;
-import com.kosa.fillinv.schedule.entity.Schedule;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.entity.ScheduleTime;
-import com.kosa.fillinv.schedule.repository.ScheduleRepository;
+import com.kosa.fillinv.booking.dto.request.BookingCreateRequest;
+import com.kosa.fillinv.booking.entity.BookingCancelReason;
+import com.kosa.fillinv.booking.entity.Booking;
+import com.kosa.fillinv.booking.entity.BookingSession;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.repository.BookingRepository;
 import com.kosa.fillinv.stock.repository.StockRepository;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
@@ -38,7 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @SpringBootTest(properties = {
         "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.datasource.url=jdbc:h2:mem:schedule-command-test;MODE=MySQL;NON_KEYWORDS=MINUTE;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+        "spring.datasource.url=jdbc:h2:mem:booking-command-test;MODE=MySQL;NON_KEYWORDS=MINUTE;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
@@ -47,10 +49,10 @@ import org.springframework.transaction.annotation.Transactional;
         "TOSS_SECRET_KEY=test-secret"
 })
 @Transactional
-class ScheduleCommandServiceTest {
+class BookingCommandServiceTest {
 
     @Autowired
-    private ScheduleCommandService scheduleCommandService;
+    private BookingCommandService bookingCommandService;
 
     @Autowired
     private LessonRepository lessonRepository;
@@ -59,7 +61,7 @@ class ScheduleCommandServiceTest {
     private CategoryRepository categoryRepository;
 
     @Autowired
-    private ScheduleRepository scheduleRepository;
+    private BookingRepository bookingRepository;
 
     @MockitoSpyBean
     private MemberRepository memberRepository;
@@ -82,8 +84,8 @@ class ScheduleCommandServiceTest {
     }
 
     @Test
-    @DisplayName("멘토링 레슨 스케줄 생성 성공")
-    void createMentoringSchedule() {
+    @DisplayName("멘토링 레슨 Booking 생성 성공")
+    void createMentoringBooking() {
         // given
         Lesson lesson = new LessonBuilder()
                 .lessonType(LessonType.MENTORING)
@@ -97,7 +99,7 @@ class ScheduleCommandServiceTest {
         AvailableTime selectedAvailableTime = lesson.getAvailableTimeList().getFirst();
         Instant startTime = selectedAvailableTime.getStartTime();
 
-        ScheduleCreateRequest request = new ScheduleCreateRequest(
+        BookingCreateRequest request = new BookingCreateRequest(
                 lesson.getId(),
                 selectedOption.getId(),
                 selectedAvailableTime.getId(),
@@ -105,32 +107,55 @@ class ScheduleCommandServiceTest {
         );
 
         // when
-        String scheduleId = scheduleCommandService.createSchedule("mentee-1", request);
+        String bookingId = bookingCommandService.createBooking("mentee-1", request);
         entityManager.flush();
         entityManager.clear();
 
         // then
-        Schedule schedule = scheduleRepository.findById(scheduleId).orElseThrow();
+        Booking booking = bookingRepository.findById(bookingId).orElseThrow();
 
-        assertThat(schedule.getLessonTitle()).isEqualTo(lesson.getTitle());
-        assertThat(schedule.getOptionName()).isEqualTo(selectedOption.getName());
-        assertThat(schedule.getScheduleTimeList()).hasSize(1);
-        assertThat(schedule.getLessonType()).isEqualTo(LessonType.MENTORING.name());
-        assertThat(schedule.getMentorId()).isEqualTo(lesson.getMentorId());
-        assertThat(schedule.getPrice()).isEqualTo(selectedOption.getPrice());
+        assertThat(booking.getLessonTitle()).isEqualTo(lesson.getTitle());
+        assertThat(booking.getOptionName()).isEqualTo(selectedOption.getName());
+        assertThat(booking.getSessions()).hasSize(1);
+        assertThat(booking.getLessonType()).isEqualTo(LessonType.MENTORING.name());
+        assertThat(booking.getMentorId()).isEqualTo(lesson.getMentorId());
+        assertThat(booking.getPrice()).isEqualTo(selectedOption.getPrice());
 
-        assertThat(schedule.getOptionName()).isEqualTo(selectedOption.getName());
-        assertThat(schedule.getOptionMinute()).isEqualTo(selectedOption.getMinute());
+        assertThat(booking.getOptionName()).isEqualTo(selectedOption.getName());
+        assertThat(booking.getOptionMinute()).isEqualTo(selectedOption.getMinute());
 
-        assertThat(schedule.getScheduleTimeList()).hasSize(1);
-        ScheduleTime time = schedule.getScheduleTimeList().get(0);
+        assertThat(booking.getSessions()).hasSize(1);
+        BookingSession time = booking.getSessions().get(0);
         assertThat(time.getStartTime()).isEqualTo(startTime);
         assertThat(time.getEndTime()).isEqualTo(startTime.plus(selectedOption.getMinute(), ChronoUnit.MINUTES));
     }
 
     @Test
-    @DisplayName("원데이 레슨 스케줄 생성 성공")
-    void createOnedaySchedule() {
+    @DisplayName("멘토링 Booking 생성 시 startTime이 없으면 INVALID_ARGUMENT 예외가 발생한다")
+    void createMentoringBooking_whenStartTimeIsNull_throwsInvalidArgument() {
+        Lesson lesson = new LessonBuilder()
+                .lessonType(LessonType.MENTORING)
+                .categoryId(categoryId)
+                .withDefaultOptions()
+                .withDefaultAvailableTimes()
+                .build();
+        lessonRepository.save(lesson);
+
+        Option selectedOption = lesson.getOptionList().getFirst();
+        BookingCreateRequest request = new BookingCreateRequest(
+                lesson.getId(),
+                selectedOption.getId(),
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> bookingCommandService.createBooking("mentee-1", request))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("원데이 레슨 Booking 생성 성공")
+    void createOnedayBooking() {
         // given
         Lesson lesson = new LessonBuilder()
                 .lessonType(LessonType.ONEDAY)
@@ -143,7 +168,7 @@ class ScheduleCommandServiceTest {
         AvailableTime selectedAvailableTime = lesson.getAvailableTimeList().getFirst();
         Instant startTime = selectedAvailableTime.getStartTime();
 
-        ScheduleCreateRequest request = new ScheduleCreateRequest(
+        BookingCreateRequest request = new BookingCreateRequest(
                 lesson.getId(),
                 null,
                 selectedAvailableTime.getId(),
@@ -153,31 +178,31 @@ class ScheduleCommandServiceTest {
         when(stockRepository.decreaseQuantity(anyString())).thenReturn(1);
 
         // when
-        String scheduleId = scheduleCommandService.createSchedule("mentee-2", request);
+        String bookingId = bookingCommandService.createBooking("mentee-2", request);
         entityManager.flush();
         entityManager.clear();
 
         // then
-        Schedule schedule = scheduleRepository.findById(scheduleId).orElseThrow();
+        Booking booking = bookingRepository.findById(bookingId).orElseThrow();
 
-        assertThat(schedule.getLessonTitle()).isEqualTo(lesson.getTitle());
-        assertThat(schedule.getOptionName()).isEqualTo(lesson.getOptionList().isEmpty() ? null : lesson.getOptionList().get(0).getName());
-        assertThat(schedule.getScheduleTimeList()).hasSize(1);
-        assertThat(schedule.getLessonType()).isEqualTo(LessonType.ONEDAY.name());
-        assertThat(schedule.getMentorId()).isEqualTo(lesson.getMentorId());
-        assertThat(schedule.getPrice()).isEqualTo(selectedAvailableTime.getPrice());
+        assertThat(booking.getLessonTitle()).isEqualTo(lesson.getTitle());
+        assertThat(booking.getOptionName()).isEqualTo(lesson.getOptionList().isEmpty() ? null : lesson.getOptionList().get(0).getName());
+        assertThat(booking.getSessions()).hasSize(1);
+        assertThat(booking.getLessonType()).isEqualTo(LessonType.ONEDAY.name());
+        assertThat(booking.getMentorId()).isEqualTo(lesson.getMentorId());
+        assertThat(booking.getPrice()).isEqualTo(selectedAvailableTime.getPrice());
 
-        assertThat(schedule.getOptionName()).isEqualTo(null);
-        assertThat(schedule.getOptionMinute()).isEqualTo(null);
+        assertThat(booking.getOptionName()).isEqualTo(null);
+        assertThat(booking.getOptionMinute()).isEqualTo(null);
 
-        ScheduleTime time = schedule.getScheduleTimeList().get(0);
+        BookingSession time = booking.getSessions().get(0);
         assertThat(time.getStartTime()).isEqualTo(selectedAvailableTime.getStartTime());
         assertThat(time.getEndTime()).isEqualTo(selectedAvailableTime.getEndTime());
     }
 
     @Test
-    @DisplayName("스터디 레슨은 AvailableTime 전체가 ScheduleTime으로 생성된다")
-    void createStudySchedule() {
+    @DisplayName("스터디 레슨은 AvailableTime 전체가 BookingSession으로 생성된다")
+    void createStudyBooking() {
         // given
         Lesson lesson = new LessonBuilder()
                 .lessonType(LessonType.STUDY)
@@ -187,7 +212,7 @@ class ScheduleCommandServiceTest {
                 .build();
         lessonRepository.save(lesson);
 
-        ScheduleCreateRequest request = new ScheduleCreateRequest(
+        BookingCreateRequest request = new BookingCreateRequest(
                 lesson.getId(),
                 null,
                 null,
@@ -197,35 +222,35 @@ class ScheduleCommandServiceTest {
         when(stockRepository.decreaseQuantity(anyString())).thenReturn(1);
 
         // when
-        String scheduleId = scheduleCommandService.createSchedule("mentee-3", request);
+        String bookingId = bookingCommandService.createBooking("mentee-3", request);
         entityManager.flush();
         entityManager.clear();
 
         // then
-        Schedule schedule = scheduleRepository.findById(scheduleId).orElseThrow();
+        Booking booking = bookingRepository.findById(bookingId).orElseThrow();
 
-        assertThat(schedule.getLessonTitle()).isEqualTo(lesson.getTitle());
-        assertThat(schedule.getOptionName()).isEqualTo(lesson.getOptionList().isEmpty() ? null : lesson.getOptionList().get(0).getName());
-        assertThat(schedule.getLessonType()).isEqualTo(LessonType.STUDY.name());
-        assertThat(schedule.getMentorId()).isEqualTo(lesson.getMentorId());
-        assertThat(schedule.getPrice()).isEqualTo(lesson.getPrice());
+        assertThat(booking.getLessonTitle()).isEqualTo(lesson.getTitle());
+        assertThat(booking.getOptionName()).isEqualTo(lesson.getOptionList().isEmpty() ? null : lesson.getOptionList().get(0).getName());
+        assertThat(booking.getLessonType()).isEqualTo(LessonType.STUDY.name());
+        assertThat(booking.getMentorId()).isEqualTo(lesson.getMentorId());
+        assertThat(booking.getPrice()).isEqualTo(lesson.getPrice());
 
-        assertThat(schedule.getScheduleTimeList()).hasSize(lesson.getAvailableTimeList().size());
+        assertThat(booking.getSessions()).hasSize(lesson.getAvailableTimeList().size());
     }
 
     @Test
     @DisplayName("환불 성공 후 APPROVAL_PENDING 원데이 Booking은 CANCELED로 전이되고 availableTimeId 기준으로 재고가 복구된다")
     void cancelByRefund_onedayApprovalPending_cancelsAndRestoresStock() {
-        Schedule schedule = schedule(LessonType.ONEDAY, ScheduleStatus.APPROVAL_PENDING);
-        scheduleRepository.save(schedule);
+        Booking booking = booking(LessonType.ONEDAY, BookingStatus.APPROVAL_PENDING);
+        bookingRepository.save(booking);
         doReturn(1).when(stockRepository).increaseQuantity("available-time-001");
 
-        scheduleCommandService.cancelByRefund(schedule.getId());
+        bookingCommandService.cancelByRefund(booking.getId());
         entityManager.flush();
         entityManager.clear();
 
-        Schedule saved = scheduleRepository.findById(schedule.getId()).orElseThrow();
-        assertThat(saved.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+        Booking saved = bookingRepository.findById(booking.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(BookingStatus.CANCELED);
         assertThat(saved.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
         assertThat(saved.getCanceledAt()).isNotNull();
         verify(stockRepository).increaseQuantity("available-time-001");
@@ -234,37 +259,37 @@ class ScheduleCommandServiceTest {
     @Test
     @DisplayName("환불 성공 후 APPROVED 스터디 Booking은 CANCELED로 전이되고 lessonId 기준으로 재고가 복구된다")
     void cancelByRefund_studyApproved_cancelsAndRestoresStockByLessonId() {
-        Schedule schedule = schedule(LessonType.STUDY, ScheduleStatus.APPROVED);
-        scheduleRepository.save(schedule);
+        Booking booking = booking(LessonType.STUDY, BookingStatus.APPROVED);
+        bookingRepository.save(booking);
         doReturn(1).when(stockRepository).increaseQuantity("lesson-001");
 
-        scheduleCommandService.cancelByRefund(schedule.getId());
+        bookingCommandService.cancelByRefund(booking.getId());
         entityManager.flush();
         entityManager.clear();
 
-        Schedule saved = scheduleRepository.findById(schedule.getId()).orElseThrow();
-        assertThat(saved.getStatus()).isEqualTo(ScheduleStatus.CANCELED);
+        Booking saved = bookingRepository.findById(booking.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(BookingStatus.CANCELED);
         assertThat(saved.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
         assertThat(saved.getCanceledAt()).isNotNull();
         verify(stockRepository).increaseQuantity("lesson-001");
-        verify(stockRepository, never()).increaseQuantity(schedule.getId());
+        verify(stockRepository, never()).increaseQuantity(booking.getId());
     }
 
     @Test
     @DisplayName("이미 CANCELED인 Booking은 환불 후처리를 다시 수행해도 재고를 복구하지 않는다")
     void cancelByRefund_whenAlreadyCanceled_doesNotRestoreStock() {
-        Schedule schedule = schedule(LessonType.ONEDAY, ScheduleStatus.APPROVAL_PENDING);
-        schedule.cancel(BookingCancelReason.REFUND_COMPLETED);
-        scheduleRepository.save(schedule);
+        Booking booking = booking(LessonType.ONEDAY, BookingStatus.APPROVAL_PENDING);
+        booking.cancel(BookingCancelReason.REFUND_COMPLETED);
+        bookingRepository.save(booking);
 
-        scheduleCommandService.cancelByRefund(schedule.getId());
+        bookingCommandService.cancelByRefund(booking.getId());
 
         verify(stockRepository, never()).increaseQuantity(anyString());
     }
 
-    private Schedule schedule(LessonType lessonType, ScheduleStatus status) {
-        return Schedule.builder()
-                .id("schedule-" + lessonType.name() + "-" + status.name())
+    private Booking booking(LessonType lessonType, BookingStatus status) {
+        return Booking.builder()
+                .id("booking-" + lessonType.name() + "-" + status.name())
                 .status(status)
                 .requestContent("신청합니다")
                 .lessonTitle("자바 레슨")
