@@ -3,8 +3,8 @@ package com.kosa.fillinv.payment.service;
 import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.repository.RefundRepository;
-import com.kosa.fillinv.schedule.entity.ScheduleStatus;
-import com.kosa.fillinv.schedule.service.ScheduleCommandService;
+import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.service.BookingCommandService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,14 +31,14 @@ class RefundInternalStateRecoveryServiceTest {
     private RefundRepository refundRepository;
 
     @Mock
-    private ScheduleCommandService scheduleCommandService;
+    private BookingCommandService bookingCommandService;
 
     @InjectMocks
     private RefundInternalStateRecoveryService refundInternalStateRecoveryService;
 
     @Test
-    @DisplayName("Refund SUCCESS이고 Schedule이 취소 가능 상태인 항목을 조회한다")
-    void recoverRefundInternalStates_queriesSuccessfulRefundsWithCancelableSchedules() {
+    @DisplayName("Refund SUCCESS이고 Booking이 취소 가능 상태인 항목을 조회한다")
+    void recoverRefundInternalStates_queriesSuccessfulRefundsWithCancelableBookings() {
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of());
 
@@ -46,7 +46,7 @@ class RefundInternalStateRecoveryServiceTest {
 
         verify(refundRepository).findRefundsPendingInternalStateRecovery(
                 eq(RefundStatus.SUCCESS),
-                eq(List.of(ScheduleStatus.APPROVAL_PENDING, ScheduleStatus.APPROVED)),
+                eq(List.of(BookingStatus.APPROVAL_PENDING, BookingStatus.APPROVED)),
                 any(Pageable.class)
         );
     }
@@ -54,32 +54,32 @@ class RefundInternalStateRecoveryServiceTest {
     @Test
     @DisplayName("조회된 환불의 orderId로 Booking 환불 취소를 재처리한다")
     void recoverRefundInternalStates_cancelsBookingsByRefund() {
-        Refund refund = refund("refund-001", "schedule-001");
+        Refund refund = refund("refund-001", "booking-001");
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of(refund));
 
         refundInternalStateRecoveryService.recoverRefundInternalStates();
 
-        verify(scheduleCommandService).cancelByRefund("schedule-001");
+        verify(bookingCommandService).cancelByRefund("booking-001");
     }
 
     @Test
     @DisplayName("한 항목의 재처리 실패가 나머지 항목 처리를 막지 않는다")
     void recoverRefundInternalStates_whenOneRecoveryFails_continuesRemainingRecoveries() {
-        Refund first = refund("refund-001", "schedule-001");
-        Refund second = refund("refund-002", "schedule-002");
+        Refund first = refund("refund-001", "booking-001");
+        Refund second = refund("refund-002", "booking-002");
         given(refundRepository.findRefundsPendingInternalStateRecovery(any(), any(), any()))
                 .willReturn(List.of(first, second));
         doThrow(new IllegalStateException("cancel failed"))
-                .when(scheduleCommandService)
-                .cancelByRefund("schedule-001");
+                .when(bookingCommandService)
+                .cancelByRefund("booking-001");
 
         refundInternalStateRecoveryService.recoverRefundInternalStates();
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(scheduleCommandService, times(2)).cancelByRefund(captor.capture());
+        verify(bookingCommandService, times(2)).cancelByRefund(captor.capture());
         assertThat(captor.getAllValues())
-                .containsExactly("schedule-001", "schedule-002");
+                .containsExactly("booking-001", "booking-002");
     }
 
     private Refund refund(String refundId, String orderId) {
