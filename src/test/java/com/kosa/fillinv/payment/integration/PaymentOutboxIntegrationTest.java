@@ -1,5 +1,7 @@
 package com.kosa.fillinv.payment.integration;
 
+import com.kosa.fillinv.member.entity.Member;
+import com.kosa.fillinv.member.repository.MemberRepository;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.PSPConfirmationStatus;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.Instant;
@@ -70,11 +73,18 @@ class PaymentOutboxIntegrationTest {
     @Autowired
     private PaymentOutboxRepository paymentOutboxRepository;
 
+    @Autowired
+    private MemberRepository memberRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void setUp() {
         paymentOutboxRepository.deleteAll();
         paymentHistoryRepository.deleteAll();
         paymentRepository.deleteAll();
+        jdbcTemplate.update("DELETE FROM members");
     }
 
     @Test
@@ -103,6 +113,8 @@ class PaymentOutboxIntegrationTest {
         assertThat(outboxEvent.getEventType()).isEqualTo("PAYMENT_COMPLETED");
         assertThat(outboxEvent.getAggregateId()).isEqualTo(command.orderId());
         assertThat(outboxEvent.getTopic()).isEqualTo("payment-topic");
+        assertThat(outboxEvent.getPayload()).contains("\"user_id\":\"mentee-001\"");
+        assertThat(outboxEvent.getPayload()).contains("\"user_name\":\"홍길동\"");
         assertThat(outboxEvent.getPayload()).contains("\"order_id\":\"schedule-001\"");
         assertThat(outboxEvent.getPayload()).contains("\"action\":\"PAYMENT_COMPLETED\"");
     }
@@ -228,6 +240,7 @@ class PaymentOutboxIntegrationTest {
     }
 
     private Payment payment() {
+        memberRepository.save(mentee());
         return Payment.builder()
                 .id("payment-001")
                 .buyerId("mentee-001")
@@ -235,6 +248,16 @@ class PaymentOutboxIntegrationTest {
                 .orderId("schedule-001")
                 .orderName("자바 멘토링 - 30분")
                 .amount(30000)
+                .build();
+    }
+
+    private Member mentee() {
+        return Member.builder()
+                .id("mentee-001")
+                .nickname("홍길동")
+                .phoneNum("01012345678")
+                .email("mentee@example.com")
+                .password("password")
                 .build();
     }
 
