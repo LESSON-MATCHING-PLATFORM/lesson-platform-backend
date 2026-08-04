@@ -367,6 +367,37 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("UNKNOWN 복구 전 기존 상태 조회가 실패하면 예외를 전파하지 않고 UNKNOWN을 반환한다")
+    void confirm_whenUnknownRecoveryLookupFails_returnsUnknownWithoutUnknownUpdate() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(executingPayment()))
+                .willThrow(new DataAccessResourceFailureException("db down"));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    PaymentStatusUpdateCommand updateCommand = invocation.getArgument(0);
+                    if (updateCommand.status() == PaymentStatus.SUCCESS) {
+                        throw new DataAccessResourceFailureException("db down");
+                    }
+                    return null;
+                })
+                .when(paymentUpdateService)
+                .updateStatus(any());
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
+
+        ArgumentCaptor<PaymentStatusUpdateCommand> captor = ArgumentCaptor.forClass(PaymentStatusUpdateCommand.class);
+        verify(paymentUpdateService, org.mockito.Mockito.times(1)).updateStatus(captor.capture());
+        assertThat(captor.getValue().status()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
     @DisplayName("FAILURE 결제 재시도에서 EXECUTING 선점 중 DB 실패가 발생하면 기존 상태를 유지하고 UNKNOWN 결과를 반환한다")
     void confirm_whenFailureRetryMarkExecutingFailsWithDatabaseError_returnsUnknownWithoutRerecording() {
         PaymentConfirmCommand command = confirmCommand();
