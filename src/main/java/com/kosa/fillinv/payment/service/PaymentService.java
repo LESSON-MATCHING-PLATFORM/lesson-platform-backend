@@ -136,7 +136,11 @@ public class PaymentService {
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         }
 
-        markPaymentFailedOrUnknown(command, status, failure);
+        if (status == PaymentStatus.UNKNOWN) {
+            markPaymentUnknownBestEffort(command, failure, e);
+        } else {
+            markPaymentFailedOrUnknown(command, status, failure);
+        }
 
         return new PaymentConfirmResult(status, failure);
     }
@@ -202,6 +206,21 @@ public class PaymentService {
             );
             return null;
         });
+    }
+
+    private void markPaymentUnknownBestEffort(PaymentConfirmCommand command, PaymentFailure failure, Throwable originalFailure) {
+        try {
+            markPaymentFailedOrUnknown(command, PaymentStatus.UNKNOWN, failure);
+        } catch (Exception recoveryFailure) {
+            log.error(
+                    "Payment UNKNOWN recovery failed. orderId={}, paymentKey={}, originalFailure={}, recoveryFailure={}",
+                    command.orderId(),
+                    command.paymentKey(),
+                    originalFailure.getClass().getSimpleName(),
+                    recoveryFailure.getClass().getSimpleName(),
+                    recoveryFailure
+            );
+        }
     }
 
     private boolean isAlreadyRetryableFailureState(String orderId) {
