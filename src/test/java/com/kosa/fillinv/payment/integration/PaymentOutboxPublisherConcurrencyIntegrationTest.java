@@ -10,8 +10,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,6 +48,9 @@ class PaymentOutboxPublisherConcurrencyIntegrationTest {
     @Autowired
     private PaymentOutboxRepository paymentOutboxRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void setUp() {
         paymentOutboxRepository.deleteAll();
@@ -76,6 +82,24 @@ class PaymentOutboxPublisherConcurrencyIntegrationTest {
             executorService.shutdownNow();
             assertThat(executorService.awaitTermination(1, TimeUnit.SECONDS)).isTrue();
         }
+
+        verify(eventPublisher, times(1)).publish(any());
+        PaymentOutboxEvent saved = paymentOutboxRepository.findById(event.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(PaymentOutboxStatus.PUBLISHED);
+    }
+
+    @Test
+    @DisplayName("오래된 PROCESSING Outbox 이벤트는 다음 publisher 실행에서 다시 발행된다")
+    void publishReadyEvents_whenProcessingClaimIsExpired_republishesEvent() {
+        PaymentOutboxEvent event = paymentOutboxRepository.save(outboxEvent("event-001"));
+        jdbcTemplate.update(
+                "update payment_outbox set status = ?, processing_started_at = ? where event_id = ?",
+                PaymentOutboxStatus.PROCESSING.name(),
+                Timestamp.from(Instant.now().minusSeconds(660)),
+                event.getId()
+        );
+
+        paymentOutboxPublisher.publishReadyEvents();
 
         verify(eventPublisher, times(1)).publish(any());
         PaymentOutboxEvent saved = paymentOutboxRepository.findById(event.getId()).orElseThrow();

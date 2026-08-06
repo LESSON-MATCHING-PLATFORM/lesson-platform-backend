@@ -20,12 +20,14 @@ public class PaymentOutboxClaimer {
             String eventId,
             Collection<PaymentOutboxStatus> statuses,
             int maxRetryCount,
+            Instant staleBefore,
             Instant processingStartedAt
     ) {
         int updated = paymentOutboxRepository.claimPublishableEvent(
                 eventId,
                 statuses,
                 maxRetryCount,
+                staleBefore,
                 processingStartedAt
         );
 
