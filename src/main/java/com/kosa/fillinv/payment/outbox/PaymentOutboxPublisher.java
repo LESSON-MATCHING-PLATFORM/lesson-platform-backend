@@ -4,10 +4,10 @@ import com.kosa.fillinv.payment.service.EventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Component
 @RequiredArgsConstructor
@@ -21,20 +21,32 @@ public class PaymentOutboxPublisher {
     );
 
     private final PaymentOutboxRepository paymentOutboxRepository;
+    private final PaymentOutboxClaimer paymentOutboxClaimer;
+    private final PaymentOutboxResultUpdater paymentOutboxResultUpdater;
     private final EventPublisher eventPublisher;
 
-    @Transactional
     public void publishReadyEvents() {
         for (PaymentOutboxEvent event : paymentOutboxRepository.findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
                 PUBLISHABLE_STATUSES,
                 MAX_RETRY_COUNT
         )) {
+            Optional<PaymentOutboxEvent> claimed = paymentOutboxClaimer.claim(
+                    event.getId(),
+                    PUBLISHABLE_STATUSES,
+                    MAX_RETRY_COUNT,
+                    Instant.now()
+            );
+
+            if (claimed.isEmpty()) {
+                continue;
+            }
+
             try {
-                eventPublisher.publish(event);
-                event.markPublished(Instant.now());
+                eventPublisher.publish(claimed.get());
+                paymentOutboxResultUpdater.markPublished(claimed.get().getId(), Instant.now());
             } catch (Exception e) {
-                event.markFailed(e.getMessage());
-                log.error("Payment outbox publish failed. eventId={}", event.getId(), e);
+                paymentOutboxResultUpdater.markFailed(claimed.get().getId(), e.getMessage());
+                log.error("Payment outbox publish failed. eventId={}", claimed.get().getId(), e);
             }
         }
     }

@@ -9,10 +9,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -20,6 +24,12 @@ class PaymentOutboxPublisherTest {
 
     @Mock
     private PaymentOutboxRepository paymentOutboxRepository;
+
+    @Mock
+    private PaymentOutboxClaimer paymentOutboxClaimer;
+
+    @Mock
+    private PaymentOutboxResultUpdater paymentOutboxResultUpdater;
 
     @Mock
     private EventPublisher eventPublisher;
@@ -32,13 +42,12 @@ class PaymentOutboxPublisherTest {
     void publishReadyEvents_marksPublishedOnSuccess() {
         PaymentOutboxEvent event = outboxEvent("event-001");
         givenPublishableEvents(event);
+        givenClaimedEvent(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
         verify(eventPublisher).publish(event);
-        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.PUBLISHED);
-        assertThat(event.getPublishedAt()).isNotNull();
-        assertThat(event.getLastError()).isNull();
+        verify(paymentOutboxResultUpdater).markPublished(eq(event.getId()), any());
     }
 
     @Test
@@ -47,13 +56,13 @@ class PaymentOutboxPublisherTest {
         PaymentOutboxEvent event = outboxEvent("event-001");
         event.markFailed("previous failure");
         givenPublishableEvents(event);
+        givenClaimedEvent(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
         verify(eventPublisher).publish(event);
-        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.PUBLISHED);
         assertThat(event.getRetryCount()).isEqualTo(1);
-        assertThat(event.getLastError()).isNull();
+        verify(paymentOutboxResultUpdater).markPublished(eq(event.getId()), any());
     }
 
     @Test
@@ -61,15 +70,14 @@ class PaymentOutboxPublisherTest {
     void publishReadyEvents_marksFailedOnError() {
         PaymentOutboxEvent event = outboxEvent("event-001");
         givenPublishableEvents(event);
+        givenClaimedEvent(event);
         doThrow(new IllegalStateException("kafka down"))
                 .when(eventPublisher)
                 .publish(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
-        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.FAILED);
-        assertThat(event.getRetryCount()).isEqualTo(1);
-        assertThat(event.getLastError()).contains("kafka down");
+        verify(paymentOutboxResultUpdater).markFailed(eq(event.getId()), eq("kafka down"));
     }
 
     @Test
@@ -81,6 +89,7 @@ class PaymentOutboxPublisherTest {
                 3
         ))
                 .willReturn(List.of(event));
+        givenClaimedEvent(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
@@ -90,12 +99,42 @@ class PaymentOutboxPublisherTest {
         );
     }
 
+    @Test
+    @DisplayName("Outbox 이벤트 claim에 실패하면 발행하지 않는다")
+    void publishReadyEvents_whenClaimFails_skipsPublish() {
+        PaymentOutboxEvent event = outboxEvent("event-001");
+        givenPublishableEvents(event);
+        given(paymentOutboxClaimer.claim(
+                eq(event.getId()),
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any()
+        ))
+                .willReturn(Optional.empty());
+
+        paymentOutboxPublisher.publishReadyEvents();
+
+        verify(eventPublisher, never()).publish(any());
+        verify(paymentOutboxResultUpdater, never()).markPublished(any(), any());
+        verify(paymentOutboxResultUpdater, never()).markFailed(any(), any());
+    }
+
     private void givenPublishableEvents(PaymentOutboxEvent event) {
         given(paymentOutboxRepository.findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
                 List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
                 3
         ))
                 .willReturn(List.of(event));
+    }
+
+    private void givenClaimedEvent(PaymentOutboxEvent event) {
+        given(paymentOutboxClaimer.claim(
+                eq(event.getId()),
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any()
+        ))
+                .willReturn(Optional.of(event));
     }
 
     private PaymentOutboxEvent outboxEvent(String id) {

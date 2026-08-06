@@ -68,6 +68,8 @@ class RefundProcessorTest {
             callback.accept(mock(TransactionStatus.class));
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
+        lenient().when(refundStatusUpdateService.tryUpdateStatusToExecuting(any(), any()))
+                .thenReturn(true);
     }
 
     @Test
@@ -80,7 +82,7 @@ class RefundProcessorTest {
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
         assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
-        verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
+        verify(refundStatusUpdateService).tryUpdateStatusToExecuting(eq(command.refundId()), any());
         verify(tossPaymentClient).cancel(any());
         verify(refundStatusUpdateService).updateStatusToSuccess(
                 eq(command.refundId()),
@@ -131,7 +133,7 @@ class RefundProcessorTest {
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
         assertThat(result.status()).isEqualTo(RefundStatus.FAILURE);
-        verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
+        verify(refundStatusUpdateService).tryUpdateStatusToExecuting(eq(command.refundId()), any());
         verify(refundStatusUpdateService).updateStatusToFailure(eq(command.refundId()), any(), eq(nextAttemptAt));
         verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
         verify(bookingCommandService, never()).cancelByRefund(any());
@@ -151,24 +153,22 @@ class RefundProcessorTest {
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
         assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
-        verify(refundStatusUpdateService).updateStatusToExecuting(eq(command.refundId()), any());
+        verify(refundStatusUpdateService).tryUpdateStatusToExecuting(eq(command.refundId()), any());
         verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
         verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
         verify(bookingCommandService, never()).cancelByRefund(any());
     }
 
     @Test
-    @DisplayName("PG 호출 전 EXECUTING 상태 전이 실패는 환불 실패 처리로 분류하지 않는다")
-    void processPGCancel_whenExecutingTransitionFails() {
+    @DisplayName("PG 호출 전 EXECUTING claim에 실패하면 PG 호출 없이 건너뛴다")
+    void processPGCancel_whenExecutingClaimFails_skipsPgCancel() {
         PGCancelCommand command = command();
-        doThrow(new IllegalStateException("invalid transition"))
-                .when(refundStatusUpdateService)
-                .updateStatusToExecuting(eq(command.refundId()), any());
+        when(refundStatusUpdateService.tryUpdateStatusToExecuting(eq(command.refundId()), any()))
+                .thenReturn(false);
 
-        assertThatThrownBy(() -> refundProcessor.processPGCancel(command))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("invalid transition");
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
+        assertThat(result.status()).isEqualTo(RefundStatus.EXECUTING);
         verify(tossPaymentClient, never()).cancel(any());
         verify(refundStatusUpdateService, never()).updateStatusToFailure(any(), any(), any());
         verify(refundStatusUpdateService, never()).updateStatusToUnknown(any(), any(), any());

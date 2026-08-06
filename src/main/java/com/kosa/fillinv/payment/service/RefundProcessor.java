@@ -5,6 +5,7 @@ import com.kosa.fillinv.payment.client.dto.PaymentCancelCommand;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.PaymentFailure;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
+import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
@@ -38,7 +39,11 @@ public class RefundProcessor {
     private final BookingCommandService bookingCommandService;
 
     public PaymentRefundResult processPGCancel(PGCancelCommand command) {
-        refundStatusUpdateService.updateStatusToExecuting(command.refundId(), Instant.now());
+        boolean claimed = refundStatusUpdateService.tryUpdateStatusToExecuting(command.refundId(), Instant.now());
+        if (!claimed) {
+            log.info("Skip refund processing because refund is already claimed or completed. refundId={}", command.refundId());
+            return new PaymentRefundResult(currentRefundStatus(command.refundId()), null);
+        }
 
         try {
             RefundExecutionResult result = tossPaymentClient.cancel(
@@ -111,5 +116,11 @@ public class RefundProcessor {
                 e instanceof DataAccessException ||
                 e instanceof TransactionException ||
                 e instanceof PersistenceException;
+    }
+
+    private RefundStatus currentRefundStatus(String refundId) {
+        return refundRepository.findById(refundId)
+                .map(Refund::getRefundStatus)
+                .orElse(RefundStatus.EXECUTING);
     }
 }

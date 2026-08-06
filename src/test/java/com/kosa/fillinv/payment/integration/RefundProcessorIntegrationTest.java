@@ -30,10 +30,18 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(properties = {
         "spring.datasource.driver-class-name=org.h2.Driver",
@@ -249,6 +257,42 @@ class RefundProcessorIntegrationTest {
         assertThat(savedBooking.getStatus()).isEqualTo(BookingStatus.CANCELED);
         assertThat(savedBooking.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
         assertThat(savedStock.getQuantity()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("두 worker가 같은 환불을 동시에 처리해도 PG 취소는 한 번만 호출된다")
+    void processPGCancel_whenTwoWorkersRunConcurrently_callsPgCancelOnce() throws Exception {
+        Refund refund = refundRepository.save(refund("refund-001"));
+        PGCancelCommand command = command(refund);
+        CountDownLatch cancelStarted = new CountDownLatch(1);
+        CountDownLatch releaseCancel = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            cancelStarted.countDown();
+            assertThat(releaseCancel.await(5, TimeUnit.SECONDS)).isTrue();
+            return successResult(command);
+        }).when(tossPaymentClient).cancel(any());
+
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        try {
+            Future<PaymentRefundResult> first = executorService.submit(() -> refundProcessor.processPGCancel(command));
+            assertThat(cancelStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<PaymentRefundResult> second = executorService.submit(() -> refundProcessor.processPGCancel(command));
+
+            PaymentRefundResult secondResult = second.get(5, TimeUnit.SECONDS);
+            releaseCancel.countDown();
+            PaymentRefundResult firstResult = first.get(5, TimeUnit.SECONDS);
+
+            assertThat(firstResult.status()).isEqualTo(RefundStatus.SUCCESS);
+            assertThat(secondResult.status()).isEqualTo(RefundStatus.EXECUTING);
+        } finally {
+            releaseCancel.countDown();
+            executorService.shutdownNow();
+            assertThat(executorService.awaitTermination(1, TimeUnit.SECONDS)).isTrue();
+        }
+
+        verify(tossPaymentClient, times(1)).cancel(any());
+        Refund savedRefund = refundRepository.findById(refund.getId()).orElseThrow();
+        assertThat(savedRefund.getRefundStatus()).isEqualTo(RefundStatus.SUCCESS);
     }
 
     private Refund refund(String refundId) {

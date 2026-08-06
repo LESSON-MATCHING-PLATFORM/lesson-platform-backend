@@ -5,6 +5,7 @@ import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -25,6 +26,21 @@ public interface RefundRepository extends JpaRepository<Refund, String> {
             Collection<RefundStatus> refundStatuses,
             Integer retryCount,
             Instant now
+    );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Refund r
+            set r.refundStatus = com.kosa.fillinv.payment.entity.RefundStatus.EXECUTING,
+                r.lastAttemptedAt = :executedAt,
+                r.retryCount = r.retryCount + 1
+            where r.id = :refundId
+              and r.refundStatus in :retryableStatuses
+            """)
+    int markExecutingIfStatusIn(
+            @Param("refundId") String refundId,
+            @Param("retryableStatuses") Collection<RefundStatus> retryableStatuses,
+            @Param("executedAt") Instant executedAt
     );
 
     @Query("""
