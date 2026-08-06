@@ -4,6 +4,7 @@ import com.kosa.fillinv.payment.client.TossPaymentClient;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.domain.RefundExtraDetails;
+import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
 import com.kosa.fillinv.payment.repository.RefundRepository;
@@ -25,10 +26,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -165,10 +166,12 @@ class RefundProcessorTest {
         PGCancelCommand command = command();
         when(refundStatusUpdateService.tryUpdateStatusToExecuting(eq(command.refundId()), any()))
                 .thenReturn(false);
+        when(refundRepository.findById(command.refundId()))
+                .thenReturn(Optional.of(refund(command.refundId(), RefundStatus.SUCCESS)));
 
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
-        assertThat(result.status()).isEqualTo(RefundStatus.EXECUTING);
+        assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
         verify(tossPaymentClient, never()).cancel(any());
         verify(refundStatusUpdateService, never()).updateStatusToFailure(any(), any(), any());
         verify(refundStatusUpdateService, never()).updateStatusToUnknown(any(), any(), any());
@@ -218,6 +221,18 @@ class RefundProcessorTest {
 
     private PGCancelCommand command() {
         return new PGCancelCommand("refund-001", "payment-key", "order-001", "단순 변심", 1000);
+    }
+
+    private Refund refund(String refundId, RefundStatus status) {
+        return Refund.builder()
+                .id(refundId)
+                .paymentId("payment-001")
+                .paymentKey("payment-key")
+                .orderId("order-001")
+                .refundStatus(status)
+                .refundAmount(1000)
+                .refundReason("단순 변심")
+                .build();
     }
 
     private void assertUnknownError(RuntimeException exception) {
