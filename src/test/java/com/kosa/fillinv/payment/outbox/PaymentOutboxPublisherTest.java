@@ -7,12 +7,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -20,6 +25,12 @@ class PaymentOutboxPublisherTest {
 
     @Mock
     private PaymentOutboxRepository paymentOutboxRepository;
+
+    @Mock
+    private PaymentOutboxClaimer paymentOutboxClaimer;
+
+    @Mock
+    private PaymentOutboxResultUpdater paymentOutboxResultUpdater;
 
     @Mock
     private EventPublisher eventPublisher;
@@ -32,13 +43,12 @@ class PaymentOutboxPublisherTest {
     void publishReadyEvents_marksPublishedOnSuccess() {
         PaymentOutboxEvent event = outboxEvent("event-001");
         givenPublishableEvents(event);
+        givenClaimedEvent(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
         verify(eventPublisher).publish(event);
-        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.PUBLISHED);
-        assertThat(event.getPublishedAt()).isNotNull();
-        assertThat(event.getLastError()).isNull();
+        verify(paymentOutboxResultUpdater).markPublished(eq(event.getId()), any(), any());
     }
 
     @Test
@@ -47,13 +57,13 @@ class PaymentOutboxPublisherTest {
         PaymentOutboxEvent event = outboxEvent("event-001");
         event.markFailed("previous failure");
         givenPublishableEvents(event);
+        givenClaimedEvent(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
         verify(eventPublisher).publish(event);
-        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.PUBLISHED);
         assertThat(event.getRetryCount()).isEqualTo(1);
-        assertThat(event.getLastError()).isNull();
+        verify(paymentOutboxResultUpdater).markPublished(eq(event.getId()), any(), any());
     }
 
     @Test
@@ -61,41 +71,112 @@ class PaymentOutboxPublisherTest {
     void publishReadyEvents_marksFailedOnError() {
         PaymentOutboxEvent event = outboxEvent("event-001");
         givenPublishableEvents(event);
+        givenClaimedEvent(event);
         doThrow(new IllegalStateException("kafka down"))
                 .when(eventPublisher)
                 .publish(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
-        assertThat(event.getStatus()).isEqualTo(PaymentOutboxStatus.FAILED);
-        assertThat(event.getRetryCount()).isEqualTo(1);
-        assertThat(event.getLastError()).contains("kafka down");
+        verify(paymentOutboxResultUpdater).markFailed(eq(event.getId()), any(), eq("kafka down"));
     }
 
     @Test
     @DisplayName("Outbox publisher는 READY와 FAILED 중 retryCount가 3 미만인 이벤트만 조회한다")
     void publishReadyEvents_queriesPublishableEventsBelowMaxRetryCount() {
         PaymentOutboxEvent event = outboxEvent("event-001");
-        given(paymentOutboxRepository.findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
-                List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
-                3
+        given(paymentOutboxRepository.findPublishableEvents(
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any(),
+                eq(PageRequest.of(0, 100))
         ))
                 .willReturn(List.of(event));
+        givenClaimedEvent(event);
 
         paymentOutboxPublisher.publishReadyEvents();
 
-        verify(paymentOutboxRepository).findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
-                List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
-                3
+        verify(paymentOutboxRepository).findPublishableEvents(
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any(),
+                eq(PageRequest.of(0, 100))
         );
     }
 
+    @Test
+    @DisplayName("Outbox 이벤트 claim에 실패하면 발행하지 않는다")
+    void publishReadyEvents_whenClaimFails_skipsPublish() {
+        PaymentOutboxEvent event = outboxEvent("event-001");
+        givenPublishableEvents(event);
+        given(paymentOutboxClaimer.claim(
+                eq(event.getId()),
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any(),
+                any()
+        ))
+                .willReturn(Optional.empty());
+
+        paymentOutboxPublisher.publishReadyEvents();
+
+        verify(eventPublisher, never()).publish(any());
+        verify(paymentOutboxResultUpdater, never()).markPublished(any(), any(), any());
+        verify(paymentOutboxResultUpdater, never()).markFailed(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Outbox claim이 발행 전 변경되었으면 발행하지 않는다")
+    void publishReadyEvents_whenClaimChangedBeforePublish_skipsPublish() {
+        PaymentOutboxEvent event = outboxEvent("event-001");
+        givenPublishableEvents(event);
+        given(paymentOutboxClaimer.claim(
+                eq(event.getId()),
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any(),
+                any()
+        ))
+                .willReturn(Optional.of(event));
+        given(paymentOutboxRepository.existsByIdAndStatusAndProcessingStartedAt(
+                eq(event.getId()),
+                eq(PaymentOutboxStatus.PROCESSING),
+                any()
+        ))
+                .willReturn(false);
+
+        paymentOutboxPublisher.publishReadyEvents();
+
+        verify(eventPublisher, never()).publish(any());
+        verify(paymentOutboxResultUpdater, never()).markPublished(any(), any(), any());
+        verify(paymentOutboxResultUpdater, never()).markFailed(any(), any(), any());
+    }
+
     private void givenPublishableEvents(PaymentOutboxEvent event) {
-        given(paymentOutboxRepository.findTop100ByStatusInAndRetryCountLessThanOrderByCreatedAtAsc(
-                List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED),
-                3
+        given(paymentOutboxRepository.findPublishableEvents(
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any(),
+                eq(PageRequest.of(0, 100))
         ))
                 .willReturn(List.of(event));
+    }
+
+    private void givenClaimedEvent(PaymentOutboxEvent event) {
+        given(paymentOutboxClaimer.claim(
+                eq(event.getId()),
+                eq(List.of(PaymentOutboxStatus.READY, PaymentOutboxStatus.FAILED)),
+                eq(3),
+                any(),
+                any()
+        ))
+                .willReturn(Optional.of(event));
+        given(paymentOutboxRepository.existsByIdAndStatusAndProcessingStartedAt(
+                eq(event.getId()),
+                eq(PaymentOutboxStatus.PROCESSING),
+                any()
+        ))
+                .willReturn(true);
     }
 
     private PaymentOutboxEvent outboxEvent(String id) {

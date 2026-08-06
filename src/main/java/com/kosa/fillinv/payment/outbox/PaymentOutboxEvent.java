@@ -46,6 +46,9 @@ public class PaymentOutboxEvent extends BaseEntity {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "processing_started_at")
+    private Instant processingStartedAt;
+
     @Column(name = "last_error", columnDefinition = "TEXT")
     private String lastError;
 
@@ -63,11 +66,13 @@ public class PaymentOutboxEvent extends BaseEntity {
     public void markPublished(Instant publishedAt) {
         this.status = PaymentOutboxStatus.PUBLISHED;
         this.publishedAt = publishedAt;
+        this.processingStartedAt = null;
         this.lastError = null;
     }
 
     public void markFailed(String lastError) {
         this.status = PaymentOutboxStatus.FAILED;
+        this.processingStartedAt = null;
         this.retryCount++;
         this.lastError = lastError;
     }

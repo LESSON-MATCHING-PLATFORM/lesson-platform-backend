@@ -10,11 +10,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class RefundStatusUpdateService {
+
+    private static final List<RefundStatus> EXECUTING_CLAIMABLE_STATUSES = List.of(
+            RefundStatus.NOT_STARTED,
+            RefundStatus.UNKNOWN,
+            RefundStatus.FAILURE
+    );
 
     private final RefundRepository refundRepository;
     private final RefundHistoryRepository refundHistoryRepository;
@@ -30,15 +37,43 @@ public class RefundStatusUpdateService {
     }
 
     @Transactional
-    public void updateStatusToExecuting(String refundId, Instant executedAt) {
+    public boolean tryUpdateStatusToExecuting(String refundId, Instant executedAt) {
         Refund refund = refundRepository.findById(refundId)
                 .orElseThrow(() -> new ResourceException.NotFound("환불 정보 없음"));
+        RefundStatus previousStatus = refund.getRefundStatus();
 
-        refundHistoryRepository.save(
-                createRefundHistory(refund, RefundStatus.EXECUTING, "PAYMENT_CANCELATION_START")
+        if (!EXECUTING_CLAIMABLE_STATUSES.contains(previousStatus)) {
+            return false;
+        }
+
+        int updated = refundRepository.markExecutingIfStatusIn(
+                refundId,
+                EXECUTING_CLAIMABLE_STATUSES,
+                executedAt
         );
 
-        refund.markExecuting(executedAt);
+        if (updated == 0) {
+            return false;
+        }
+
+        refundHistoryRepository.save(
+                RefundHistory.builder()
+                        .id(UUID.randomUUID().toString())
+                        .paymentKey(refund.getPaymentKey())
+                        .previousStatus(previousStatus)
+                        .newStatus(RefundStatus.EXECUTING)
+                        .reason("PAYMENT_CANCELATION_START")
+                        .build()
+        );
+
+        return true;
+    }
+
+    @Transactional
+    public void updateStatusToExecuting(String refundId, Instant executedAt) {
+        if (!tryUpdateStatusToExecuting(refundId, executedAt)) {
+            throw new IllegalStateException("EXECUTING 상태로 변경할 수 없습니다.");
+        }
     }
 
     @Transactional
