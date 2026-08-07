@@ -82,4 +82,21 @@ public interface BookingRepository extends JpaRepository<Booking, String> {
             "JOIN s.sessions st " +
             "WHERE s.lessonId = :lessonId AND s.status IN :statuses AND st.startTime >= :since")
     List<BookedTimeVO> findBookedTimesByLessonIdAndStatusInAndStartTimeAfter(@Param("lessonId") String lessonId, @Param("statuses") Collection<BookingStatus> statuses, @Param("since") Instant since);
+
+    @Query("SELECT CASE WHEN COUNT(s) > 0 THEN true ELSE false END " +
+            "FROM Booking s " +
+            "JOIN s.sessions st " +
+            "WHERE s.mentorId = :mentorId " +
+            "AND s.lessonType = :lessonType " +
+            "AND s.status IN :statuses " +
+            "AND s.deletedAt IS NULL " +
+            "AND st.startTime < :endTime " +
+            "AND st.endTime > :startTime")
+    boolean existsOverlappingMentoringBooking(
+            @Param("mentorId") String mentorId,
+            @Param("lessonType") String lessonType,
+            @Param("statuses") Collection<BookingStatus> statuses,
+            @Param("startTime") Instant startTime,
+            @Param("endTime") Instant endTime
+    );
 }

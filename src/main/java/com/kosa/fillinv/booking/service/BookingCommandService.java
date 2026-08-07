@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @RequiredArgsConstructor
 public class BookingCommandService {
+
+    private static final Set<BookingStatus> MENTORING_OCCUPIED_STATUSES = Set.of(
+            BookingStatus.PAYMENT_PENDING,
+            BookingStatus.APPROVAL_PENDING,
+            BookingStatus.APPROVED
+    );
 
     private final BookingReader bookingReader;
     private final BookingLessonReader bookingLessonReader;
@@ -150,12 +157,27 @@ public class BookingCommandService {
         }
 
         Instant endTime = startTime.plus(option.getMinute(), ChronoUnit.MINUTES); // 옵션의 분 단위를 더해서 종료 시간 계산
+        validateMentoringTimeAvailable(lesson, startTime, endTime);
 
         booking.addSession(
                 BookingSession.of(startTime, endTime, booking)
         );
 
         return booking;
+    }
+
+    private void validateMentoringTimeAvailable(Lesson lesson, Instant startTime, Instant endTime) {
+        boolean exists = bookingRepository.existsOverlappingMentoringBooking(
+                lesson.getMentorId(),
+                lesson.getLessonType().name(),
+                MENTORING_OCCUPIED_STATUSES,
+                startTime,
+                endTime
+        );
+
+        if (exists) {
+            throw new BusinessException(ErrorCode.MENTORING_TIME_ALREADY_BOOKED);
+        }
     }
 
     private Booking createOnedayBooking(
