@@ -160,25 +160,35 @@ class BookingCommandServiceTest {
     @EnumSource(value = BookingStatus.class, names = {"PAYMENT_PENDING", "APPROVAL_PENDING", "APPROVED"})
     @DisplayName("멘토링 Booking 생성 시 같은 멘토의 활성 예약 시간과 겹치면 예외가 발생한다")
     void createMentoringBooking_whenOverlapsActiveMentoringBooking_throwsAlreadyBooked(BookingStatus status) {
-        Lesson lesson = new LessonBuilder()
+        String mentorId = "mentor-overlap";
+        Lesson requestedLesson = new LessonBuilder()
+                .id("requested-lesson-" + status.name())
                 .lessonType(LessonType.MENTORING)
+                .mentorId(mentorId)
                 .categoryId(categoryId)
                 .withDefaultOptions()
                 .build();
-        lessonRepository.save(lesson);
+        Lesson existingLesson = new LessonBuilder()
+                .id("existing-lesson-" + status.name())
+                .lessonType(LessonType.MENTORING)
+                .mentorId(mentorId)
+                .categoryId(categoryId)
+                .build();
+        lessonRepository.save(requestedLesson);
+        lessonRepository.save(existingLesson);
 
         Instant existingStartTime = Instant.parse("2026-08-07T01:00:00Z");
         saveMentoringBooking(
                 "existing-booking-" + status.name(),
-                lesson,
+                existingLesson,
                 status,
                 existingStartTime,
                 existingStartTime.plus(60, ChronoUnit.MINUTES)
         );
 
-        Option selectedOption = lesson.getOptionList().getFirst();
+        Option selectedOption = requestedLesson.getOptionList().getFirst();
         BookingCreateRequest request = new BookingCreateRequest(
-                lesson.getId(),
+                requestedLesson.getId(),
                 selectedOption.getId(),
                 null,
                 existingStartTime.plus(30, ChronoUnit.MINUTES)
