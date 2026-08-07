@@ -49,6 +49,7 @@ public enum ErrorCode {
     INVALID_SCHEDULE_STATUS(NOT_FOUND, "SCH09", "스케쥴 상태가 올바르지 않습니다."),
     INVALID_DATE_FORMAT(NOT_FOUND, "SCH10", "날짜 형식이 올바르지 않습니다."),
     NO_SEAT(BAD_REQUEST, "SCH11", "남은 좌석이 없습니다."),
+    MENTORING_TIME_ALREADY_BOOKED(BAD_REQUEST, "SCH12", "이미 예약된 멘토링 시간입니다."),
 
     // Review Error
     REVIEW_NOT_ALLOWED(BAD_REQUEST, "R01", "리뷰를 작성할 수 없는 상태입니다."),

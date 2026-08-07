@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.kosa.fillinv.category.entity.Category;
 import com.kosa.fillinv.category.repository.CategoryRepository;
 import com.kosa.fillinv.global.exception.BusinessException;
+import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.lesson.domain.LessonBuilder;
 import com.kosa.fillinv.lesson.entity.AvailableTime;
 import com.kosa.fillinv.lesson.entity.Lesson;
@@ -33,6 +34,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -151,6 +154,104 @@ class BookingCommandServiceTest {
 
         assertThatThrownBy(() -> bookingCommandService.createBooking("mentee-1", request))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = BookingStatus.class, names = {"PAYMENT_PENDING", "APPROVAL_PENDING", "APPROVED"})
+    @DisplayName("멘토링 Booking 생성 시 같은 멘토의 활성 예약 시간과 겹치면 예외가 발생한다")
+    void createMentoringBooking_whenOverlapsActiveMentoringBooking_throwsAlreadyBooked(BookingStatus status) {
+        Lesson lesson = new LessonBuilder()
+                .lessonType(LessonType.MENTORING)
+                .categoryId(categoryId)
+                .withDefaultOptions()
+                .build();
+        lessonRepository.save(lesson);
+
+        Instant existingStartTime = Instant.parse("2026-08-07T01:00:00Z");
+        saveMentoringBooking(
+                "existing-booking-" + status.name(),
+                lesson,
+                status,
+                existingStartTime,
+                existingStartTime.plus(60, ChronoUnit.MINUTES)
+        );
+
+        Option selectedOption = lesson.getOptionList().getFirst();
+        BookingCreateRequest request = new BookingCreateRequest(
+                lesson.getId(),
+                selectedOption.getId(),
+                null,
+                existingStartTime.plus(30, ChronoUnit.MINUTES)
+        );
+
+        assertThatThrownBy(() -> bookingCommandService.createBooking("mentee-2", request))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MENTORING_TIME_ALREADY_BOOKED));
+    }
+
+    @Test
+    @DisplayName("멘토링 Booking 생성 시 취소된 예약 시간과 겹쳐도 생성할 수 있다")
+    void createMentoringBooking_whenOverlapsCanceledMentoringBooking_createsBooking() {
+        Lesson lesson = new LessonBuilder()
+                .lessonType(LessonType.MENTORING)
+                .categoryId(categoryId)
+                .withDefaultOptions()
+                .build();
+        lessonRepository.save(lesson);
+
+        Instant canceledStartTime = Instant.parse("2026-08-07T01:00:00Z");
+        saveMentoringBooking(
+                "canceled-booking",
+                lesson,
+                BookingStatus.CANCELED,
+                canceledStartTime,
+                canceledStartTime.plus(60, ChronoUnit.MINUTES)
+        );
+
+        Option selectedOption = lesson.getOptionList().getFirst();
+        BookingCreateRequest request = new BookingCreateRequest(
+                lesson.getId(),
+                selectedOption.getId(),
+                null,
+                canceledStartTime.plus(30, ChronoUnit.MINUTES)
+        );
+
+        String bookingId = bookingCommandService.createBooking("mentee-2", request);
+
+        assertThat(bookingRepository.findById(bookingId)).isPresent();
+    }
+
+    @Test
+    @DisplayName("멘토링 Booking 생성 시 기존 예약 종료 시각과 새 예약 시작 시각이 맞닿으면 생성할 수 있다")
+    void createMentoringBooking_whenTouchesExistingEndTime_createsBooking() {
+        Lesson lesson = new LessonBuilder()
+                .lessonType(LessonType.MENTORING)
+                .categoryId(categoryId)
+                .withDefaultOptions()
+                .build();
+        lessonRepository.save(lesson);
+
+        Instant existingStartTime = Instant.parse("2026-08-07T01:00:00Z");
+        Instant existingEndTime = existingStartTime.plus(30, ChronoUnit.MINUTES);
+        saveMentoringBooking(
+                "existing-booking",
+                lesson,
+                BookingStatus.APPROVED,
+                existingStartTime,
+                existingEndTime
+        );
+
+        Option selectedOption = lesson.getOptionList().getFirst();
+        BookingCreateRequest request = new BookingCreateRequest(
+                lesson.getId(),
+                selectedOption.getId(),
+                null,
+                existingEndTime
+        );
+
+        String bookingId = bookingCommandService.createBooking("mentee-2", request);
+
+        assertThat(bookingRepository.findById(bookingId)).isPresent();
     }
 
     @Test
@@ -305,5 +406,29 @@ class BookingCommandServiceTest {
                 .optionId("option-001")
                 .availableTimeId("available-time-001")
                 .build();
+    }
+
+    private void saveMentoringBooking(String id, Lesson lesson, BookingStatus status, Instant startTime, Instant endTime) {
+        Booking booking = Booking.builder()
+                .id(id)
+                .status(status)
+                .requestContent("신청합니다")
+                .lessonTitle(lesson.getTitle())
+                .lessonType(LessonType.MENTORING.name())
+                .lessonDescription(lesson.getDescription())
+                .lessonLocation(lesson.getLocation())
+                .lessonCategoryName("개발")
+                .mentorNickname("멘토")
+                .price(10000)
+                .lessonId(lesson.getId())
+                .menteeId("existing-mentee")
+                .mentorId(lesson.getMentorId())
+                .optionId("option-001")
+                .build();
+        booking.addSession(BookingSession.of(startTime, endTime, booking));
+
+        bookingRepository.save(booking);
+        entityManager.flush();
+        entityManager.clear();
     }
 }
