@@ -9,6 +9,7 @@ import com.kosa.fillinv.lesson.entity.LessonType;
 import com.kosa.fillinv.lesson.service.client.*;
 import com.kosa.fillinv.lesson.service.dto.*;
 import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.policy.MentoringOccupancyPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -40,8 +41,6 @@ public class LessonReadService {
     private final BookingClient bookingClient;
 
     private static final Set<BookingStatus> PARTICIPATED_STATUSES = Set.of(BookingStatus.APPROVED, BookingStatus.COMPLETED);
-
-    private static final Set<BookingStatus> MENTORING_BOOKED_STATUES = Set.of(BookingStatus.PAYMENT_PENDING, BookingStatus.APPROVAL_PENDING, BookingStatus.APPROVED);
 
     public Page<LessonThumbnail> search() {
         return search(LessonSearchRequest.empty());
@@ -135,7 +134,7 @@ public class LessonReadService {
         if (lessonDTO.lessonType() == LessonType.MENTORING) {
             bookedTimes = bookingClient.getBookedTimes(
                     request.lessonId(),
-                    MENTORING_BOOKED_STATUES,
+                    MentoringOccupancyPolicy.occupiedStatuses(),
                     Instant.now().minus(7, ChronoUnit.DAYS) // 모든 schedule_time을 가져오지 않게
             );
         }

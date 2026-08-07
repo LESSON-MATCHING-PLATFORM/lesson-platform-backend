@@ -12,12 +12,12 @@ import com.kosa.fillinv.booking.entity.BookingCancelReason;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingSession;
 import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.policy.MentoringOccupancyPolicy;
 import com.kosa.fillinv.booking.repository.BookingRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import lombok.RequiredArgsConstructor;
@@ -28,12 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @RequiredArgsConstructor
 public class BookingCommandService {
-
-    private static final Set<BookingStatus> MENTORING_OCCUPIED_STATUSES = Set.of(
-            BookingStatus.PAYMENT_PENDING,
-            BookingStatus.APPROVAL_PENDING,
-            BookingStatus.APPROVED
-    );
 
     private final BookingReader bookingReader;
     private final BookingLessonReader bookingLessonReader;
@@ -170,7 +164,7 @@ public class BookingCommandService {
         boolean exists = bookingRepository.existsOverlappingMentoringBooking(
                 lesson.getMentorId(),
                 lesson.getLessonType().name(),
-                MENTORING_OCCUPIED_STATUSES,
+                MentoringOccupancyPolicy.occupiedStatuses(),
                 startTime,
                 endTime
         );
