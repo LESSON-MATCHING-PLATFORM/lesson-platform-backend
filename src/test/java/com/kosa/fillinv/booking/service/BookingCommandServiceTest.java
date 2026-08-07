@@ -25,6 +25,7 @@ import com.kosa.fillinv.booking.entity.BookingCancelReason;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingSession;
 import com.kosa.fillinv.booking.entity.BookingStatus;
+import com.kosa.fillinv.booking.policy.MentoringOccupancyPolicy;
 import com.kosa.fillinv.booking.repository.BookingRepository;
 import com.kosa.fillinv.stock.repository.StockRepository;
 import jakarta.persistence.EntityManager;
@@ -384,6 +385,46 @@ class BookingCommandServiceTest {
         assertThat(saved.getCanceledAt()).isNotNull();
         verify(stockRepository).increaseQuantity("lesson-001");
         verify(stockRepository, never()).increaseQuantity(booking.getId());
+    }
+
+    @Test
+    @DisplayName("환불 성공 후 MENTORING Booking은 CANCELED로 전이되어 점유 시간 조회에서 제외된다")
+    void cancelByRefund_mentoringApprovalPending_releasesOccupiedTimeByCanceledStatus() {
+        Lesson lesson = new LessonBuilder()
+                .lessonType(LessonType.MENTORING)
+                .categoryId(categoryId)
+                .withDefaultOptions()
+                .build();
+        lessonRepository.save(lesson);
+
+        Instant startTime = Instant.parse("2026-08-07T01:00:00Z");
+        saveMentoringBooking(
+                "mentoring-booking-to-cancel",
+                lesson,
+                BookingStatus.APPROVAL_PENDING,
+                startTime,
+                startTime.plus(60, ChronoUnit.MINUTES)
+        );
+
+        assertThat(bookingRepository.findBookedTimesByLessonIdAndStatusInAndStartTimeAfter(
+                lesson.getId(),
+                MentoringOccupancyPolicy.occupiedStatuses(),
+                startTime.minus(1, ChronoUnit.MINUTES)
+        )).hasSize(1);
+
+        bookingCommandService.cancelByRefund("mentoring-booking-to-cancel");
+        entityManager.flush();
+        entityManager.clear();
+
+        Booking saved = bookingRepository.findById("mentoring-booking-to-cancel").orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(BookingStatus.CANCELED);
+        assertThat(saved.getCancelReason()).isEqualTo(BookingCancelReason.REFUND_COMPLETED);
+        assertThat(bookingRepository.findBookedTimesByLessonIdAndStatusInAndStartTimeAfter(
+                lesson.getId(),
+                MentoringOccupancyPolicy.occupiedStatuses(),
+                startTime.minus(1, ChronoUnit.MINUTES)
+        )).isEmpty();
+        verify(stockRepository, never()).increaseQuantity(anyString());
     }
 
     @Test
