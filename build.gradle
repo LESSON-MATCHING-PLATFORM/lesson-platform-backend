@@ -24,6 +24,12 @@ repositories {
     mavenCentral()
 }
 
+dependencyManagement {
+    imports {
+        mavenBom "com.google.cloud:spring-cloud-gcp-dependencies:8.0.2"
+    }
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -53,6 +59,8 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind' // JSON processing (ObjectMapper)
 
     implementation 'org.springframework.boot:spring-boot-starter-kafka'
+
+    implementation 'com.google.cloud:spring-cloud-gcp-starter-secretmanager'
 }
 
 tasks.named('test') {

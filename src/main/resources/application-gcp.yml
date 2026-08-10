@@ -1,0 +1,48 @@
+spring:
+  config:
+    activate:
+      on-profile: gcp
+    import: sm://
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${sm://DB_HOST}:3306/fillinv?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: ${sm://DB_USERNAME}
+    password: ${sm://DB_PASSWORD}
+
+  jpa:
+    database: mysql
+    hibernate:
+      ddl-auto: validate
+    defer-datasource-initialization: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        default_batch_fetch_size: 100
+
+  data:
+    web:
+      pageable:
+        default-page-size: 10
+        one-indexed-parameters: false
+
+  sql:
+    init:
+      mode: never
+
+logging:
+  level:
+    root: INFO
+
+jwt:
+  secret: ${sm://JWT_SECRET_KEY}
+  expiration-time: ${JWT_EXPIRATION_TIME:360000000}
+
+PSP:
+  toss:
+    secretKey: ${sm://TOSS_SECRET_KEY}
+    url: https://api.tosspayments.com
+    api:
+      connect_timeout: 3s
+      read_timeout: 5s

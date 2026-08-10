@@ -1,64 +1,52 @@
-name: Build and Deploy to EC2
+name: Build and Deploy to GCP Compute Engine
 
 on:
   push:
     branches: [ "main", "cicdtest" ]
 
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: "asia-northeast3"
+  ARTIFACT_REGISTRY_REPO: "backend-server-repo"
+  IMAGE_NAME: "spring-app"
+  COMPUTE_INSTANCE: "lesson-backend"
+  COMPUTE_ZONE: "asia-northeast3-a"
+
 jobs:
   build-and-push:
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
 
     steps:
-    - name: Code Checkout
-      uses: actions/checkout@v6
-    
-    # 1. AWS 인증
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v6.0.0
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-southeast-2
-    
-    # 2. ECR 로그인
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Code Checkout
+        uses: actions/checkout@v4
 
-    # 3. Docker 이미지 빌드, 태그, 푸시
-    - name: Build, tag, and push image to Amazon ECR
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: lesson-platform/server
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        docker build --platform linux/amd64 -f src/main/resources/Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: gradle
 
-    # 4. EC2 Docker 이미지 pull 및 docker run
-    - name: Deploy to EC2
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ec2-user
-        key: ${{ secrets.EC2_KEY }}
-        script: |
-          aws ecr get-login-password --region ap-southeast-2 \
-          | docker login \
-            --username AWS \
-            --password-stdin ${{ steps.login-ecr.outputs.registry }}
-    
-          docker pull ${{ steps.login-ecr.outputs.registry }}/lesson-platform/server:${{ github.sha }}
-    
-          docker stop lesson-server || true
-          docker rm lesson-server || true
-    
-          docker run -d -p 8080:8080 \
-            --name lesson-server \
-            -e DB_HOST=${{ secrets.DB_HOST }} \
-            -e TOSS_SECRET_KEY=${{ secrets.PSP_TOSS_SECRET_KEY }} \
-            ${{ steps.login-ecr.outputs.registry }}/lesson-platform/server:${{ github.sha }}
-    
+      - name: Build Spring Boot Application
+        run: ./gradlew build -x test
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker $GCP_REGION-docker.pkg.dev
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REGISTRY_REPO/$IMAGE_NAME:latest .
+          docker push $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REGISTRY_REPO/$IMAGE_NAME:latest
+
+      - name: Deploy to GCP Compute Engine
+        run: |
+          gcloud compute instances reset $COMPUTE_INSTANCE --zone=$COMPUTE_ZONE
