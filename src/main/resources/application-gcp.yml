@@ -6,7 +6,7 @@ spring:
 
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://${sm://DB_HOST}:3306/fillinv?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    url: jdbc:mysql://${sm://DB_HOST}:3306/fillinv_backend?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     username: ${sm://DB_USERNAME}
     password: ${sm://DB_PASSWORD}
 
