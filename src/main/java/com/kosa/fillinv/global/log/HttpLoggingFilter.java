@@ -20,6 +20,9 @@ import java.util.UUID;
 @Component
 public class HttpLoggingFilter extends OncePerRequestFilter {
 
+    private static final String REQUEST_ID_HEADER = "X-Request-Id";
+    private static final String REQUEST_ID_MDC_KEY = "requestId";
+
     private static final List<String> EXCLUDE_URI = List.of(
             "/docs/**",
             "/swagger-ui.html",
@@ -46,7 +49,9 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
         final ContentCachingRequestWrapper cacheRequest = new ContentCachingRequestWrapper(request, 1024 * 1024 * 50); // 50MB까지 캐싱 가능
         final ContentCachingResponseWrapper cacheResponse = new ContentCachingResponseWrapper(response);
 
-        createRequestId();
+        String requestId = resolveRequestId(request);
+        MDC.put(REQUEST_ID_MDC_KEY, requestId);
+        response.setHeader(REQUEST_ID_HEADER, requestId);
 
         writeRequestLog(cacheRequest);
 
@@ -56,13 +61,16 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
         } finally {
             writeResponseLog(cacheResponse);
             cacheResponse.copyBodyToResponse();
-            MDC.remove("request_id");
+            MDC.remove(REQUEST_ID_MDC_KEY);
         }
     }
 
-    private void createRequestId() {
-        String requestId = UUID.randomUUID().toString().substring(0, 8);
-        MDC.put("request_id", requestId);
+    private String resolveRequestId(HttpServletRequest request) {
+        String requestId = request.getHeader(REQUEST_ID_HEADER);
+        if (requestId == null || requestId.isBlank()) {
+            return UUID.randomUUID().toString();
+        }
+        return requestId;
     }
 
     private void writeRequestLog(final ContentCachingRequestWrapper cacheRequest) {
@@ -80,4 +88,3 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
                 .anyMatch(pattern -> antPathMatcher.match(pattern, requestURI));
     }
 }
-
