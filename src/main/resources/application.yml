@@ -3,8 +3,6 @@ spring:
     name: lesson-backend
   profiles:
     active: test   # 디폴트 프로파일을 test로 설정
-  flyway:
-    enabled: false
 
 server:
   port: 8080
