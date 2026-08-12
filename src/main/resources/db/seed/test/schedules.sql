@@ -1,5 +1,3 @@
-SET FOREIGN_KEY_CHECKS = 0;
-
 INSERT INTO categories (category_id, name, parent_category_id, category_path)
 VALUES
     (1000, '미지정', NULL, '1000'),
@@ -102,5 +100,3 @@ ON DUPLICATE KEY UPDATE
     schedule_id = VALUES(schedule_id),
     start_time = VALUES(start_time),
     end_time = VALUES(end_time);
-
-SET FOREIGN_KEY_CHECKS = 1;
