@@ -32,6 +32,8 @@ class JWTUtilTest {
         assertFalse(jwtUtil.isTokenExpired(token));
         assertEquals(email, jwtUtil.getEmail(token));
         assertEquals(memberId, jwtUtil.getMemberId(token));
+        assertEquals(memberId, jwtUtil.getSubject(token));
+        assertEquals("USER", jwtUtil.getRole(token));
     }
 
     @Test

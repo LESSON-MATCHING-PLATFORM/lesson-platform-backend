@@ -46,10 +46,26 @@ public class JWTUtil {
                 .get("memberId", String.class);
     }
 
+    public String getSubject(String token) {
+        return jwtParser
+                .parseSignedClaims(token)
+                .getPayload()
+                .getSubject();
+    }
+
+    public String getRole(String token) {
+        return jwtParser
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("role", String.class);
+    }
+
     public String createJwt(String email, String memberId, Long expiredMs) {
         return Jwts.builder()
+                .subject(memberId)
                 .claim("email", email)
                 .claim("memberId", memberId)
+                .claim("role", "USER")
                 .issuedAt(new Date(System.currentTimeMillis()))
                 .expiration(new Date(System.currentTimeMillis() + expiredMs))
                 .signWith(secretKey)
