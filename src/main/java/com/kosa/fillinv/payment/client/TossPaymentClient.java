@@ -6,16 +6,19 @@ import com.kosa.fillinv.payment.client.dto.TossPaymentConfirmRequest;
 import com.kosa.fillinv.payment.domain.*;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class TossPaymentClient {
 
     private static final int MAX_RETRY_COUNT = 2;
@@ -135,15 +138,30 @@ public class TossPaymentClient {
 
     private RestClient.ResponseSpec.ErrorHandler tossErrorHandler() {
         return (req, res) -> {
-            try (InputStream is = res.getBody()) {
+            String responseBody = StreamUtils.copyToString(res.getBody(), StandardCharsets.UTF_8);
+            String httpStatus = res.getStatusCode().toString();
+
+            try {
                 TossPaymentConfirmationResponse.TossFailureResponse errorResponse =
-                        objectMapper.readValue(is, TossPaymentConfirmationResponse.TossFailureResponse.class);
+                        objectMapper.readValue(responseBody, TossPaymentConfirmationResponse.TossFailureResponse.class);
 
                 TossPaymentError tossPaymentError = TossPaymentError.get(errorResponse.code());
+                String tossCode = errorResponse.code();
+                String tossMessage = errorResponse.message();
+
+                log.warn(
+                        "Toss payment request failed. method={} uri={} status={} tossCode={} tossMessage={} responseBody={}",
+                        req.getMethod(),
+                        req.getURI(),
+                        httpStatus,
+                        tossCode,
+                        tossMessage,
+                        responseBody
+                );
 
                 throw PSPConfirmationException.builder()
-                        .errorCode(tossPaymentError.getStatusCode().toString())
-                        .errorMessage(tossPaymentError.getDescription())
+                        .errorCode(tossCode == null || tossCode.isBlank() ? "TOSS_ERROR_WITHOUT_CODE" : tossCode)
+                        .errorMessage(tossMessage == null || tossMessage.isBlank() ? tossPaymentError.getDescription() : tossMessage)
                         .isSuccess(tossPaymentError.isSuccess())
                         .isFailure(tossPaymentError.isFailure())
                         .isUnknown(tossPaymentError.isUnknown())
@@ -151,7 +169,24 @@ public class TossPaymentClient {
                         .build();
 
             } catch (IOException e) {
-                throw new RuntimeException("에러 응답 파싱 실패", e);
+                log.error(
+                        "Toss payment error response parse failed. method={} uri={} status={} responseBody={}",
+                        req.getMethod(),
+                        req.getURI(),
+                        httpStatus,
+                        responseBody,
+                        e
+                );
+
+                throw PSPConfirmationException.builder()
+                        .errorCode("TOSS_ERROR_RESPONSE_PARSE_FAILED")
+                        .errorMessage("Toss 에러 응답 파싱에 실패했습니다. status=" + httpStatus + ", body=" + responseBody)
+                        .isSuccess(false)
+                        .isFailure(false)
+                        .isUnknown(true)
+                        .isRetryable(true)
+                        .cause(e)
+                        .build();
             }
         };
     }
