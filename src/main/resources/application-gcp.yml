@@ -36,6 +36,12 @@ spring:
     init:
       mode: never
 
+  kafka:
+    bootstrap-servers: ${sm://KAFKA_BOOTSTRAP_SERVERS}:9094
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
 logging:
   level:
     root: INFO
