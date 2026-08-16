@@ -2,6 +2,9 @@ package com.kosa.fillinv.payment.service;
 
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
+import com.kosa.fillinv.payment.client.LedgerClient;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryRequest;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryResponse;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
@@ -35,6 +38,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,6 +57,9 @@ class PaymentServiceTest {
 
     @Mock
     private TossPaymentClient tossPaymentClient;
+
+    @Mock
+    private LedgerClient ledgerClient;
 
     @Mock
     private PaymentRepository paymentRepository;
@@ -81,6 +88,8 @@ class PaymentServiceTest {
                 });
         lenient().when(paymentUpdateService.tryMarkConfirmExecuting(any()))
                 .thenReturn(true);
+        lenient().when(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .thenReturn(ledgerEntryResponse());
     }
 
     @Test
@@ -140,6 +149,7 @@ class PaymentServiceTest {
     @DisplayName("confirm 성공 시 결제를 SUCCESS로 변경하고 Booking 결제 완료 처리를 호출한다")
     void confirm_success_updatesPaymentAndCompletesBookingPayment() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
 
@@ -164,6 +174,17 @@ class PaymentServiceTest {
         ));
         verify(bookingCommandService).completePayment(command.orderId());
         verify(paymentOutboxService).savePaymentCompletedEvent(command, successResult(command));
+
+        ArgumentCaptor<LedgerEntryRequest> ledgerCaptor = ArgumentCaptor.forClass(LedgerEntryRequest.class);
+        verify(ledgerClient).recordEntry(ledgerCaptor.capture());
+        LedgerEntryRequest ledgerRequest = ledgerCaptor.getValue();
+        assertThat(ledgerRequest.idempotencyKey()).isEqualTo("PAYMENT:payment-001:COMPLETED");
+        assertThat(ledgerRequest.transactionId()).isEqualTo("payment-001");
+        assertThat(ledgerRequest.orderId()).isEqualTo("booking-001");
+        assertThat(ledgerRequest.userId()).isEqualTo("mentee-001");
+        assertThat(ledgerRequest.accountId()).isEqualTo("mentor-001");
+        assertThat(ledgerRequest.amount()).isEqualByComparingTo("30000");
+        assertThat(ledgerRequest.direction()).isEqualTo("CREDIT");
     }
 
     @Test
@@ -307,9 +328,29 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("Ledger 기록 timeout 시 결제를 UNKNOWN으로 변경하고 완료 후처리를 수행하지 않는다")
+    void confirm_whenLedgerRecordingTimesOut_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        given(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .willThrow(new ResourceAccessException("ledger timeout"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("ResourceAccessException");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
     @DisplayName("Toss confirm 성공 후 DB 저장 실패 시 UNKNOWN으로 변경하고 Booking 후처리와 Outbox 저장은 수행하지 않는다")
     void confirm_whenSuccessPersistenceFails_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
         org.mockito.Mockito.doAnswer(invocation -> {
@@ -367,32 +408,21 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("UNKNOWN 복구 전 기존 상태 조회가 실패하면 예외를 전파하지 않고 UNKNOWN을 반환한다")
-    void confirm_whenUnknownRecoveryLookupFails_returnsUnknownWithoutUnknownUpdate() {
+    @DisplayName("Ledger 기록 전 결제 상태 조회가 실패하면 UNKNOWN을 반환한다")
+    void confirm_whenPaymentLookupForLedgerFails_returnsUnknownWithoutPaymentUpdate() {
         PaymentConfirmCommand command = confirmCommand();
         given(paymentRepository.findByOrderId(command.orderId()))
                 .willReturn(Optional.of(executingPayment()))
                 .willThrow(new DataAccessResourceFailureException("db down"));
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
-        org.mockito.Mockito.doAnswer(invocation -> {
-                    PaymentStatusUpdateCommand updateCommand = invocation.getArgument(0);
-                    if (updateCommand.status() == PaymentStatus.SUCCESS) {
-                        throw new DataAccessResourceFailureException("db down");
-                    }
-                    return null;
-                })
-                .when(paymentUpdateService)
-                .updateStatus(any());
 
         PaymentConfirmResult result = paymentService.confirm(command);
 
         assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
         assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
 
-        ArgumentCaptor<PaymentStatusUpdateCommand> captor = ArgumentCaptor.forClass(PaymentStatusUpdateCommand.class);
-        verify(paymentUpdateService, org.mockito.Mockito.times(1)).updateStatus(captor.capture());
-        assertThat(captor.getValue().status()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(paymentUpdateService, never()).updateStatus(any());
         verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
@@ -439,6 +469,7 @@ class PaymentServiceTest {
     @DisplayName("Booking 결제 완료 처리 실패는 결제 성공 결과에 영향을 주지 않는다")
     void confirm_whenBookingCompleteFails_keepsPaymentSuccess() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
         givenFailureWhenBookingComplete(command.orderId());
@@ -524,6 +555,26 @@ class PaymentServiceTest {
                         command.amount().longValue(),
                         "raw"
                 )
+        );
+    }
+
+    private LedgerEntryResponse ledgerEntryResponse() {
+        return new LedgerEntryResponse(
+                "ledger-entry-001",
+                "PAYMENT:payment-001:COMPLETED",
+                "PAYMENT",
+                "payment-001",
+                "booking-001",
+                "mentee-001",
+                "mentor-001",
+                new BigDecimal("30000"),
+                "KRW",
+                "CREDIT",
+                "POSTED",
+                "결제 완료",
+                Instant.parse("2026-08-16T00:00:00Z"),
+                null,
+                0L
         );
     }
 
