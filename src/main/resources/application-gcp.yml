@@ -57,3 +57,9 @@ PSP:
     api:
       connect_timeout: 3s
       read_timeout: 5s
+
+ledger:
+  base-url: http://${LEDGER_HOST}:8080
+  api:
+    connect-timeout: 3s
+    read-timeout: 5s

@@ -18,3 +18,9 @@ payment:
     retry-fixed-delay-ms: 10000
   booking-completion:
     retry-fixed-delay-ms: 10000
+
+ledger:
+  base-url: ${LEDGER_BASE_URL:http://localhost:8083}
+  api:
+    connect-timeout: 3s
+    read-timeout: 5s
