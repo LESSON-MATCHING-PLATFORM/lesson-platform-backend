@@ -198,6 +198,7 @@ public class PaymentService {
     private void recordPaymentLedger(PaymentConfirmCommand command, PaymentExecutionResult result) {
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+        validatePaymentAmountMatchesPsp(payment, result);
 
         LedgerEntryRequest request = new LedgerEntryRequest(
                 "PAYMENT:" + payment.getId() + ":COMPLETED",
@@ -219,6 +220,22 @@ public class PaymentService {
                 payment.getId(),
                 response == null ? null : response.entryId()
         );
+    }
+
+    private void validatePaymentAmountMatchesPsp(Payment payment, PaymentExecutionResult result) {
+        long persistedAmount = payment.getAmount().longValue();
+        long pspAmount = result.paymentExtraDetails().totalAmount();
+
+        if (persistedAmount != pspAmount) {
+            throw PSPConfirmationException.builder()
+                    .errorCode("PAYMENT_AMOUNT_MISMATCH")
+                    .errorMessage("결제 금액이 저장된 Payment 금액과 일치하지 않습니다.")
+                    .isSuccess(false)
+                    .isFailure(false)
+                    .isUnknown(true)
+                    .isRetryable(true)
+                    .build();
+        }
     }
 
     private void markPaymentFailedOrUnknown(PaymentConfirmCommand command, PaymentStatus status, PaymentFailure failure) {

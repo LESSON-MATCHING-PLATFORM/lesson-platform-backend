@@ -32,13 +32,17 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -347,6 +351,49 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("Ledger 5xx 응답 시 결제를 UNKNOWN으로 변경하고 완료 후처리를 수행하지 않는다")
+    void confirm_whenLedgerRecordingReturns5xx_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        given(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .willThrow(HttpServerErrorException.create(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Internal Server Error",
+                        HttpHeaders.EMPTY,
+                        new byte[0],
+                        StandardCharsets.UTF_8
+                ));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("InternalServerError");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("PSP 결제 금액과 DB Payment 금액이 다르면 UNKNOWN으로 변경하고 Ledger와 완료 후처리를 수행하지 않는다")
+    void confirm_whenPspAmountDiffersFromPersistedPayment_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResultWithAmount(command, 40000L));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
     @DisplayName("Toss confirm 성공 후 DB 저장 실패 시 UNKNOWN으로 변경하고 Booking 후처리와 Outbox 저장은 수행하지 않는다")
     void confirm_whenSuccessPersistenceFails_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
@@ -543,6 +590,10 @@ class PaymentServiceTest {
     }
 
     private PaymentExecutionResult successResult(PaymentConfirmCommand command) {
+        return successResultWithAmount(command, command.amount().longValue());
+    }
+
+    private PaymentExecutionResult successResultWithAmount(PaymentConfirmCommand command, Long totalAmount) {
         return new PaymentExecutionResult(
                 command.paymentKey(),
                 command.orderId(),
@@ -552,7 +603,7 @@ class PaymentServiceTest {
                         Instant.parse("2026-07-24T05:00:00Z"),
                         "자바 멘토링 - 30분",
                         PSPConfirmationStatus.DONE,
-                        command.amount().longValue(),
+                        totalAmount,
                         "raw"
                 )
         );
