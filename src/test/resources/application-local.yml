@@ -1,0 +1,36 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:lesson-backend-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;NON_KEYWORDS=MINUTE;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+
+  flyway:
+    enabled: false
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    defer-datasource-initialization: false
+    show-sql: false
+
+  sql:
+    init:
+      mode: never
+
+PSP:
+  toss:
+    secretKey: test-secret-key
+    url: http://localhost:18080
+
+jwt:
+  secret: test-jwt-secret-key-for-local-tests
+  expiration-time: 360000000
+
+ledger:
+  base-url: http://localhost:18081
