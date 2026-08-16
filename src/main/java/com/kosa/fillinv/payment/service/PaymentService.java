@@ -4,6 +4,9 @@ import com.kosa.fillinv.global.exception.ResourceException;
 import com.kosa.fillinv.global.exception.BusinessException;
 import com.kosa.fillinv.global.response.ErrorCode;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
+import com.kosa.fillinv.payment.client.LedgerClient;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryRequest;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryResponse;
 import com.kosa.fillinv.payment.controller.dto.CheckoutCommand;
 import com.kosa.fillinv.payment.controller.dto.CheckoutResult;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
@@ -31,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.sql.SQLException;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Service
@@ -40,6 +44,7 @@ public class PaymentService {
 
     private final PaymentUpdateService paymentUpdateService;
     private final TossPaymentClient tossPaymentClient;
+    private final LedgerClient ledgerClient;
     private final PaymentRepository paymentRepository;
     private final BookingRepository bookingRepository;
     private final BookingCommandService bookingCommandService;
@@ -105,6 +110,7 @@ public class PaymentService {
 
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
+            recordPaymentLedger(command, result);
             completePaymentSuccess(command, result);
             completeBookingPayment(command.orderId());
 
@@ -129,6 +135,9 @@ public class PaymentService {
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else if (e instanceof ResourceAccessException) { // time out or network
+            status = PaymentStatus.UNKNOWN;
+            failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
+        } else if (e instanceof org.springframework.web.client.RestClientException) {
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else {
@@ -184,6 +193,32 @@ public class PaymentService {
             paymentOutboxService.savePaymentCompletedEvent(command, result);
             return null;
         });
+    }
+
+    private void recordPaymentLedger(PaymentConfirmCommand command, PaymentExecutionResult result) {
+        Payment payment = paymentRepository.findByOrderId(command.orderId())
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+
+        LedgerEntryRequest request = new LedgerEntryRequest(
+                "PAYMENT:" + payment.getId() + ":COMPLETED",
+                "PAYMENT",
+                payment.getId(),
+                payment.getOrderId(),
+                payment.getBuyerId(),
+                payment.getSellerId(),
+                BigDecimal.valueOf(result.paymentExtraDetails().totalAmount()),
+                "KRW",
+                "CREDIT",
+                "결제 완료"
+        );
+
+        LedgerEntryResponse response = ledgerClient.recordEntry(request);
+        log.info(
+                "Payment ledger entry recorded. orderId={}, paymentId={}, entryId={}",
+                payment.getOrderId(),
+                payment.getId(),
+                response == null ? null : response.entryId()
+        );
     }
 
     private void markPaymentFailedOrUnknown(PaymentConfirmCommand command, PaymentStatus status, PaymentFailure failure) {
