@@ -422,7 +422,6 @@ class PaymentServiceTest {
         assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
         assertThat(result.failure().errorCode()).isEqualTo("DataAccessResourceFailureException");
 
-        ArgumentCaptor<PaymentStatusUpdateCommand> captor = ArgumentCaptor.forClass(PaymentStatusUpdateCommand.class);
         verify(paymentUpdateService, never()).updateStatus(any());
         verify(bookingCommandService, never()).completePayment(any());
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());

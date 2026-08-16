@@ -206,7 +206,7 @@ public class PaymentService {
                 payment.getOrderId(),
                 payment.getBuyerId(),
                 payment.getSellerId(),
-                BigDecimal.valueOf(result.paymentExtraDetails().totalAmount()),
+                BigDecimal.valueOf(payment.getAmount()),
                 "KRW",
                 "CREDIT",
                 "결제 완료"
