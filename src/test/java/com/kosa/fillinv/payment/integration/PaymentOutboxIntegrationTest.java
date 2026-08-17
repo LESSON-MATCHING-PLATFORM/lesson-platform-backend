@@ -2,7 +2,10 @@ package com.kosa.fillinv.payment.integration;
 
 import com.kosa.fillinv.member.entity.Member;
 import com.kosa.fillinv.member.repository.MemberRepository;
+import com.kosa.fillinv.payment.client.LedgerClient;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryRequest;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryResponse;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.PSPConfirmationStatus;
 import com.kosa.fillinv.payment.domain.PaymentExecutionResult;
@@ -28,7 +31,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -38,10 +43,12 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import org.springframework.web.client.ResourceAccessException;
 
 @SpringBootTest(properties = {
         "spring.datasource.driver-class-name=org.h2.Driver",
@@ -58,6 +65,9 @@ class PaymentOutboxIntegrationTest {
 
     @MockitoBean
     private TossPaymentClient tossPaymentClient;
+
+    @MockitoBean
+    private LedgerClient ledgerClient;
 
     @MockitoBean
     private BookingCommandService bookingCommandService;
@@ -86,10 +96,12 @@ class PaymentOutboxIntegrationTest {
         paymentHistoryRepository.deleteAll();
         paymentRepository.deleteAll();
         jdbcTemplate.update("DELETE FROM members");
+        lenient().when(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .thenReturn(ledgerEntryResponse());
     }
 
     @Test
-    @DisplayName("결제 승인 성공 시 Payment SUCCESS와 Outbox READY가 실제 DB에 함께 저장된다")
+    @DisplayName("결제 승인 성공 시 Ledger를 기록한 뒤 Payment SUCCESS와 Outbox READY가 실제 DB에 함께 저장된다")
     void confirmSuccess_savesPaymentSuccessAndOutboxReady() {
         Payment payment = paymentRepository.save(payment());
         PaymentConfirmCommand command = confirmCommand();
@@ -118,6 +130,17 @@ class PaymentOutboxIntegrationTest {
         assertThat(outboxEvent.getPayload()).contains("\"user_name\":\"홍길동\"");
         assertThat(outboxEvent.getPayload()).contains("\"order_id\":\"schedule-001\"");
         assertThat(outboxEvent.getPayload()).contains("\"action\":\"PAYMENT_COMPLETED\"");
+        verify(bookingCommandService).completePayment(command.orderId());
+
+        LedgerEntryRequest ledgerRequest = recordedLedgerRequest();
+        assertThat(ledgerRequest.idempotencyKey()).isEqualTo("PAYMENT:payment-001:COMPLETED");
+        assertThat(ledgerRequest.transactionId()).isEqualTo(payment.getId());
+        assertThat(ledgerRequest.orderId()).isEqualTo(command.orderId());
+        assertThat(ledgerRequest.userId()).isEqualTo("mentee-001");
+        assertThat(ledgerRequest.accountId()).isEqualTo("mentor-001");
+        assertThat(ledgerRequest.amount()).isEqualByComparingTo("30000");
+        assertThat(ledgerRequest.currency()).isEqualTo("KRW");
+        assertThat(ledgerRequest.direction()).isEqualTo("CREDIT");
     }
 
     @Test
@@ -145,6 +168,7 @@ class PaymentOutboxIntegrationTest {
 
         assertThat(outboxEvents).hasSize(1);
         assertThat(outboxEvents.getFirst().getEventType()).isEqualTo("PAYMENT_COMPLETED");
+        verify(bookingCommandService).completePayment(command.orderId());
     }
 
     @Test
@@ -170,6 +194,8 @@ class PaymentOutboxIntegrationTest {
         assertThat(histories).extracting(PaymentHistory::getNewStatus)
                 .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.FAILURE);
         assertThat(outboxEvents).isEmpty();
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(bookingCommandService, never()).completePayment(any());
     }
 
     @Test
@@ -195,6 +221,63 @@ class PaymentOutboxIntegrationTest {
         assertThat(histories).extracting(PaymentHistory::getNewStatus)
                 .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.UNKNOWN);
         assertThat(outboxEvents).isEmpty();
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("Ledger 기록 실패 시 Payment UNKNOWN과 이력이 저장되고 Outbox와 Booking 완료는 수행하지 않는다")
+    void confirmLedgerFailure_savesPaymentUnknownAndHistoryWithoutOutboxOrBookingCompletion() {
+        Payment payment = paymentRepository.save(payment());
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        given(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .willThrow(new ResourceAccessException("ledger timeout"));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        Payment savedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
+        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("ResourceAccessException");
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(savedPayment.getPaymentKey()).isEqualTo(command.paymentKey());
+        assertThat(histories).extracting(PaymentHistory::getPreviousStatus)
+                .containsExactly(PaymentStatus.NOT_STARTED, PaymentStatus.EXECUTING);
+        assertThat(histories).extracting(PaymentHistory::getNewStatus)
+                .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.UNKNOWN);
+        assertThat(outboxEvents).isEmpty();
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("PSP 금액과 저장된 Payment 금액이 다르면 UNKNOWN으로 저장하고 Ledger와 완료 후처리를 수행하지 않는다")
+    void confirmAmountMismatch_savesPaymentUnknownWithoutLedgerOutboxOrBookingCompletion() {
+        Payment payment = paymentRepository.save(payment());
+        PaymentConfirmCommand command = confirmCommand();
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command, 40000L));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        Payment savedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
+        List<PaymentHistory> histories = paymentHistoryRepository.findAllByPaymentId(payment.getId());
+        List<PaymentOutboxEvent> outboxEvents = paymentOutboxRepository.findAll();
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        assertThat(savedPayment.getPaymentStatus()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(savedPayment.getPaymentKey()).isEqualTo(command.paymentKey());
+        assertThat(histories).extracting(PaymentHistory::getPreviousStatus)
+                .containsExactly(PaymentStatus.NOT_STARTED, PaymentStatus.EXECUTING);
+        assertThat(histories).extracting(PaymentHistory::getNewStatus)
+                .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.UNKNOWN);
+        assertThat(outboxEvents).isEmpty();
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(bookingCommandService, never()).completePayment(any());
     }
 
     @Test
@@ -238,6 +321,15 @@ class PaymentOutboxIntegrationTest {
                 .containsExactly(PaymentStatus.EXECUTING, PaymentStatus.SUCCESS);
         assertThat(outboxEvents).hasSize(1);
         verify(tossPaymentClient, times(1)).confirm(command);
+        verify(ledgerClient, times(1)).recordEntry(any());
+        verify(bookingCommandService, times(1)).completePayment(command.orderId());
+    }
+
+    private LedgerEntryRequest recordedLedgerRequest() {
+        org.mockito.ArgumentCaptor<LedgerEntryRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(LedgerEntryRequest.class);
+        verify(ledgerClient).recordEntry(captor.capture());
+        return captor.getValue();
     }
 
     private Payment payment() {
@@ -278,6 +370,10 @@ class PaymentOutboxIntegrationTest {
     }
 
     private PaymentExecutionResult successResult(PaymentConfirmCommand command) {
+        return successResult(command, command.amount().longValue());
+    }
+
+    private PaymentExecutionResult successResult(PaymentConfirmCommand command, Long totalAmount) {
         return new PaymentExecutionResult(
                 command.paymentKey(),
                 command.orderId(),
@@ -287,9 +383,29 @@ class PaymentOutboxIntegrationTest {
                         Instant.parse("2026-07-24T05:00:00Z"),
                         "자바 멘토링 - 30분",
                         PSPConfirmationStatus.DONE,
-                        command.amount().longValue(),
+                        totalAmount,
                         "raw"
                 )
+        );
+    }
+
+    private LedgerEntryResponse ledgerEntryResponse() {
+        return new LedgerEntryResponse(
+                "ledger-entry-001",
+                "PAYMENT:payment-001:COMPLETED",
+                "PAYMENT",
+                "payment-001",
+                "schedule-001",
+                "mentee-001",
+                "mentor-001",
+                new BigDecimal("30000"),
+                "KRW",
+                "CREDIT",
+                "POSTED",
+                "결제 완료",
+                Instant.parse("2026-08-16T00:00:00Z"),
+                null,
+                0L
         );
     }
 
