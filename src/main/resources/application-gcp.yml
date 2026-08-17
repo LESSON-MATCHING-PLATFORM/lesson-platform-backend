@@ -61,5 +61,22 @@ PSP:
 ledger:
   base-url: http://${LEDGER_HOST}:8080
   api:
-    connect-timeout: 3s
-    read-timeout: 5s
+    connect-timeout: 1s
+    read-timeout: 3s
+    retry:
+      max-attempts: 2
+      backoff-ms: 100
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      ledger:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 2
+        record-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException

@@ -63,6 +63,10 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind' // JSON processing (ObjectMapper)
 
     implementation 'org.springframework.boot:spring-boot-starter-kafka'
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+
+    implementation 'org.springframework.retry:spring-retry:2.0.12'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.3.0'
 
     implementation 'com.google.cloud:spring-cloud-gcp-starter-secretmanager'
 }

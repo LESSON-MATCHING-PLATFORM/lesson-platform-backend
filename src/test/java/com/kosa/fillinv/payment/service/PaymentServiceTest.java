@@ -20,6 +20,7 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.booking.repository.BookingRepository;
@@ -32,13 +33,17 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -294,6 +300,8 @@ class PaymentServiceTest {
     @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 Booking은 변경하지 않는다")
     void confirm_failure_updatesPaymentFailureOnly() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willThrow(failureException());
 
@@ -313,6 +321,8 @@ class PaymentServiceTest {
     @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 Booking은 변경하지 않는다")
     void confirm_timeout_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willThrow(new ResourceAccessException("timeout"));
 
@@ -344,6 +354,84 @@ class PaymentServiceTest {
         assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
         verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("Ledger 5xx 응답 시 결제를 UNKNOWN으로 변경하고 완료 후처리를 수행하지 않는다")
+    void confirm_whenLedgerRecordingReturns5xx_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        given(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .willThrow(HttpServerErrorException.create(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Internal Server Error",
+                        HttpHeaders.EMPTY,
+                        new byte[0],
+                        StandardCharsets.UTF_8
+                ));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("InternalServerError");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("Ledger Circuit이 열려 있으면 결제를 UNKNOWN으로 변경하고 완료 후처리를 수행하지 않는다")
+    void confirm_whenLedgerCircuitIsOpen_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        given(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .willThrow(mock(CallNotPermittedException.class));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("CallNotPermittedException");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("PSP 결제 금액과 DB Payment 금액이 다르면 UNKNOWN으로 변경하고 Ledger와 완료 후처리를 수행하지 않는다")
+    void confirm_whenPspAmountDiffersFromPersistedPayment_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResultWithAmount(command, 40000L));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("결제 요청 금액과 DB Payment 금액이 다르면 Toss 승인 요청을 보내지 않는다")
+    void confirm_whenRequestAmountDiffersFromPersistedPayment_skipsTossConfirm() {
+        PaymentConfirmCommand command = new PaymentConfirmCommand("payment-key-001", "booking-001", 40000);
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
     }
 
     @Test
@@ -413,6 +501,7 @@ class PaymentServiceTest {
         PaymentConfirmCommand command = confirmCommand();
         given(paymentRepository.findByOrderId(command.orderId()))
                 .willReturn(Optional.of(executingPayment()))
+                .willReturn(Optional.of(payment()))
                 .willThrow(new DataAccessResourceFailureException("db down"));
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));
@@ -543,6 +632,10 @@ class PaymentServiceTest {
     }
 
     private PaymentExecutionResult successResult(PaymentConfirmCommand command) {
+        return successResultWithAmount(command, command.amount().longValue());
+    }
+
+    private PaymentExecutionResult successResultWithAmount(PaymentConfirmCommand command, Long totalAmount) {
         return new PaymentExecutionResult(
                 command.paymentKey(),
                 command.orderId(),
@@ -552,7 +645,7 @@ class PaymentServiceTest {
                         Instant.parse("2026-07-24T05:00:00Z"),
                         "자바 멘토링 - 30분",
                         PSPConfirmationStatus.DONE,
-                        command.amount().longValue(),
+                        totalAmount,
                         "raw"
                 )
         );

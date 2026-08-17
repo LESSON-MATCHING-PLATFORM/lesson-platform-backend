@@ -19,6 +19,7 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.booking.repository.BookingRepository;
@@ -108,6 +109,7 @@ public class PaymentService {
                 return handleConfirmExecutionAlreadyClaimed(command.orderId());
             }
 
+            validatePaymentAmountMatchesRequest(command);
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
             recordPaymentLedger(command, result);
@@ -135,6 +137,9 @@ public class PaymentService {
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else if (e instanceof ResourceAccessException) { // time out or network
+            status = PaymentStatus.UNKNOWN;
+            failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
+        } else if (e instanceof CallNotPermittedException) { // Ledger circuit is open
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else if (e instanceof org.springframework.web.client.RestClientException) {
@@ -198,6 +203,7 @@ public class PaymentService {
     private void recordPaymentLedger(PaymentConfirmCommand command, PaymentExecutionResult result) {
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+        validatePaymentAmountMatchesPsp(payment, result);
 
         LedgerEntryRequest request = new LedgerEntryRequest(
                 "PAYMENT:" + payment.getId() + ":COMPLETED",
@@ -219,6 +225,38 @@ public class PaymentService {
                 payment.getId(),
                 response == null ? null : response.entryId()
         );
+    }
+
+    private void validatePaymentAmountMatchesRequest(PaymentConfirmCommand command) {
+        Payment payment = paymentRepository.findByOrderId(command.orderId())
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+
+        if (!payment.getAmount().equals(command.amount())) {
+            throw PSPConfirmationException.builder()
+                    .errorCode("PAYMENT_AMOUNT_MISMATCH")
+                    .errorMessage("결제 요청 금액이 저장된 Payment 금액과 일치하지 않습니다.")
+                    .isSuccess(false)
+                    .isFailure(false)
+                    .isUnknown(true)
+                    .isRetryable(true)
+                    .build();
+        }
+    }
+
+    private void validatePaymentAmountMatchesPsp(Payment payment, PaymentExecutionResult result) {
+        long persistedAmount = payment.getAmount().longValue();
+        long pspAmount = result.paymentExtraDetails().totalAmount();
+
+        if (persistedAmount != pspAmount) {
+            throw PSPConfirmationException.builder()
+                    .errorCode("PAYMENT_AMOUNT_MISMATCH")
+                    .errorMessage("결제 금액이 저장된 Payment 금액과 일치하지 않습니다.")
+                    .isSuccess(false)
+                    .isFailure(false)
+                    .isUnknown(true)
+                    .isRetryable(true)
+                    .build();
+        }
     }
 
     private void markPaymentFailedOrUnknown(PaymentConfirmCommand command, PaymentStatus status, PaymentFailure failure) {
