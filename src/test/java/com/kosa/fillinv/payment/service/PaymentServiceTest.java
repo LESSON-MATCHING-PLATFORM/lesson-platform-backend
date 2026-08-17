@@ -300,6 +300,8 @@ class PaymentServiceTest {
     @DisplayName("Toss 명확한 실패 시 결제를 FAILURE로 변경하고 Booking은 변경하지 않는다")
     void confirm_failure_updatesPaymentFailureOnly() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willThrow(failureException());
 
@@ -319,6 +321,8 @@ class PaymentServiceTest {
     @DisplayName("Toss 타임아웃 시 결제를 UNKNOWN으로 변경하고 Booking은 변경하지 않는다")
     void confirm_timeout_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId()))
+                .willReturn(Optional.of(payment()));
         given(tossPaymentClient.confirm(command))
                 .willThrow(new ResourceAccessException("timeout"));
 
@@ -415,6 +419,22 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("결제 요청 금액과 DB Payment 금액이 다르면 Toss 승인 요청을 보내지 않는다")
+    void confirm_whenRequestAmountDiffersFromPersistedPayment_skipsTossConfirm() {
+        PaymentConfirmCommand command = new PaymentConfirmCommand("payment-key-001", "booking-001", 40000);
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        verify(tossPaymentClient, never()).confirm(any());
+        verify(ledgerClient, never()).recordEntry(any());
+        verify(bookingCommandService, never()).completePayment(any());
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+    }
+
+    @Test
     @DisplayName("Toss confirm 성공 후 DB 저장 실패 시 UNKNOWN으로 변경하고 Booking 후처리와 Outbox 저장은 수행하지 않는다")
     void confirm_whenSuccessPersistenceFails_updatesPaymentUnknownOnly() {
         PaymentConfirmCommand command = confirmCommand();
@@ -481,6 +501,7 @@ class PaymentServiceTest {
         PaymentConfirmCommand command = confirmCommand();
         given(paymentRepository.findByOrderId(command.orderId()))
                 .willReturn(Optional.of(executingPayment()))
+                .willReturn(Optional.of(payment()))
                 .willThrow(new DataAccessResourceFailureException("db down"));
         given(tossPaymentClient.confirm(command))
                 .willReturn(successResult(command));

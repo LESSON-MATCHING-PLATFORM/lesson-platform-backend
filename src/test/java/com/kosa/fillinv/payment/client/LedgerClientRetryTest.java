@@ -115,6 +115,23 @@ class LedgerClientRetryTest {
     }
 
     @Test
+    @DisplayName("Ledger 4xx 응답이 반복되어도 Circuit은 열리지 않는다")
+    void recordEntry_whenRepeatedClientErrors_keepsCircuitClosed() {
+        LedgerEntryRequest request = request();
+        given(responseSpec.body(LedgerEntryResponse.class))
+                .willThrow(clientError());
+
+        assertThatThrownBy(() -> ledgerClient.recordEntry(request))
+                .isInstanceOf(HttpClientErrorException.class);
+        assertThatThrownBy(() -> ledgerClient.recordEntry(request))
+                .isInstanceOf(HttpClientErrorException.class);
+
+        verify(ledgerRestClient, times(2)).post();
+        assertThat(circuitBreakerRegistry.circuitBreaker("ledger").getState())
+                .isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
     @DisplayName("Ledger 반복 장애로 Circuit이 열리면 이후 요청을 차단한다")
     void recordEntry_whenCircuitOpens_rejectsSubsequentCalls() {
         LedgerEntryRequest request = request();

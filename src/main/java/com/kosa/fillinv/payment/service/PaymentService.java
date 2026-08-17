@@ -109,6 +109,7 @@ public class PaymentService {
                 return handleConfirmExecutionAlreadyClaimed(command.orderId());
             }
 
+            validatePaymentAmountMatchesRequest(command);
             PaymentExecutionResult result = tossPaymentClient.confirm(command);
 
             recordPaymentLedger(command, result);
@@ -224,6 +225,22 @@ public class PaymentService {
                 payment.getId(),
                 response == null ? null : response.entryId()
         );
+    }
+
+    private void validatePaymentAmountMatchesRequest(PaymentConfirmCommand command) {
+        Payment payment = paymentRepository.findByOrderId(command.orderId())
+                .orElseThrow(() -> new ResourceException.NotFound("결제 정보 없음"));
+
+        if (!payment.getAmount().equals(command.amount())) {
+            throw PSPConfirmationException.builder()
+                    .errorCode("PAYMENT_AMOUNT_MISMATCH")
+                    .errorMessage("결제 요청 금액이 저장된 Payment 금액과 일치하지 않습니다.")
+                    .isSuccess(false)
+                    .isFailure(false)
+                    .isUnknown(true)
+                    .isRetryable(true)
+                    .build();
+        }
     }
 
     private void validatePaymentAmountMatchesPsp(Payment payment, PaymentExecutionResult result) {
