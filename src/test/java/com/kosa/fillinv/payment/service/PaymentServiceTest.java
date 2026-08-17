@@ -20,6 +20,7 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.booking.repository.BookingRepository;
@@ -50,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -370,6 +372,25 @@ class PaymentServiceTest {
 
         assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
         assertThat(result.failure().errorCode()).isEqualTo("InternalServerError");
+        assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
+        verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).completePayment(any());
+    }
+
+    @Test
+    @DisplayName("Ledger Circuit이 열려 있으면 결제를 UNKNOWN으로 변경하고 완료 후처리를 수행하지 않는다")
+    void confirm_whenLedgerCircuitIsOpen_updatesPaymentUnknownOnly() {
+        PaymentConfirmCommand command = confirmCommand();
+        given(paymentRepository.findByOrderId(command.orderId())).willReturn(Optional.of(payment()));
+        given(tossPaymentClient.confirm(command))
+                .willReturn(successResult(command));
+        given(ledgerClient.recordEntry(any(LedgerEntryRequest.class)))
+                .willThrow(mock(CallNotPermittedException.class));
+
+        PaymentConfirmResult result = paymentService.confirm(command);
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(result.failure().errorCode()).isEqualTo("CallNotPermittedException");
         assertThat(lastPaymentUpdateCommand().status()).isEqualTo(PaymentStatus.UNKNOWN);
         verify(paymentOutboxService, never()).savePaymentCompletedEvent(any(), any());
         verify(bookingCommandService, never()).completePayment(any());

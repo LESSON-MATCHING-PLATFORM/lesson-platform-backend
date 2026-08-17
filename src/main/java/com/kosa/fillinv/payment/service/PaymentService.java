@@ -19,6 +19,7 @@ import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentConfirmResult;
 import com.kosa.fillinv.payment.service.dto.PaymentStatusUpdateCommand;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.kosa.fillinv.booking.entity.Booking;
 import com.kosa.fillinv.booking.entity.BookingStatus;
 import com.kosa.fillinv.booking.repository.BookingRepository;
@@ -135,6 +136,9 @@ public class PaymentService {
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else if (e instanceof ResourceAccessException) { // time out or network
+            status = PaymentStatus.UNKNOWN;
+            failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
+        } else if (e instanceof CallNotPermittedException) { // Ledger circuit is open
             status = PaymentStatus.UNKNOWN;
             failure = new PaymentFailure(e.getClass().getSimpleName(), e.getMessage() == null ? "" : e.getMessage());
         } else if (e instanceof org.springframework.web.client.RestClientException) {

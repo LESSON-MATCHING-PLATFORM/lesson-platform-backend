@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -13,6 +14,9 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -38,7 +42,12 @@ import static org.mockito.Mockito.verify;
         "spring.sql.init.mode=never",
         "TOSS_SECRET_KEY=test-secret",
         "ledger.api.retry.max-attempts=2",
-        "ledger.api.retry.backoff-ms=0"
+        "ledger.api.retry.backoff-ms=0",
+        "resilience4j.circuitbreaker.instances.ledger.sliding-window-size=2",
+        "resilience4j.circuitbreaker.instances.ledger.minimum-number-of-calls=2",
+        "resilience4j.circuitbreaker.instances.ledger.failure-rate-threshold=50",
+        "resilience4j.circuitbreaker.instances.ledger.wait-duration-in-open-state=1s",
+        "resilience4j.circuitbreaker.instances.ledger.permitted-number-of-calls-in-half-open-state=1"
 })
 class LedgerClientRetryTest {
 
@@ -49,11 +58,15 @@ class LedgerClientRetryTest {
     private final RestClient.RequestBodySpec bodySpec = mock(RestClient.RequestBodySpec.class);
     private final RestClient.ResponseSpec responseSpec = mock(RestClient.ResponseSpec.class);
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private LedgerClient ledgerClient;
+
+    @Autowired
+    private CircuitBreakerRegistry circuitBreakerRegistry;
 
     @BeforeEach
     void setUp() {
+        circuitBreakerRegistry.circuitBreaker("ledger").reset();
         given(ledgerRestClient.post()).willReturn(requestSpec);
         given(requestSpec.uri(anyString())).willReturn(bodySpec);
         given(bodySpec.body(any(LedgerEntryRequest.class))).willReturn(bodySpec);
@@ -99,6 +112,26 @@ class LedgerClientRetryTest {
                 .isInstanceOf(HttpClientErrorException.class);
 
         verify(ledgerRestClient, times(1)).post();
+    }
+
+    @Test
+    @DisplayName("Ledger 반복 장애로 Circuit이 열리면 이후 요청을 차단한다")
+    void recordEntry_whenCircuitOpens_rejectsSubsequentCalls() {
+        LedgerEntryRequest request = request();
+        given(responseSpec.body(LedgerEntryResponse.class))
+                .willThrow(serverError());
+
+        assertThatThrownBy(() -> ledgerClient.recordEntry(request))
+                .isInstanceOf(HttpServerErrorException.class);
+        assertThatThrownBy(() -> ledgerClient.recordEntry(request))
+                .isInstanceOf(HttpServerErrorException.class);
+
+        assertThatThrownBy(() -> ledgerClient.recordEntry(request))
+                .isInstanceOf(CallNotPermittedException.class);
+
+        verify(ledgerRestClient, times(4)).post();
+        assertThat(circuitBreakerRegistry.circuitBreaker("ledger").getState())
+                .isEqualTo(CircuitBreaker.State.OPEN);
     }
 
     private LedgerEntryRequest request() {
