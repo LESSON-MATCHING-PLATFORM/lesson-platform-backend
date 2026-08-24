@@ -145,7 +145,7 @@ public class RefundProcessor {
                 .orElseThrow(() -> new LedgerRefundRecordingException("환불 정보를 찾을 수 없습니다. refundId=" + command.refundId()));
         Payment payment = paymentRepository.findById(refund.getPaymentId())
                 .orElseThrow(() -> new LedgerRefundRecordingException("결제 정보를 찾을 수 없습니다. paymentId=" + refund.getPaymentId()));
-        LedgerEntryResponse originalEntry = findOriginalPaymentLedgerEntry(payment.getId());
+        LedgerEntryResponse originalEntry = findOriginalPaymentLedgerEntry(refund.getPaymentId());
 
         if ("REVERSED".equals(originalEntry.status())) {
             log.info(
@@ -181,10 +181,10 @@ public class RefundProcessor {
         );
     }
 
-    private LedgerEntryResponse findOriginalPaymentLedgerEntry(String paymentId) {
-        List<LedgerEntryResponse> entries = ledgerClient.findByTransactionId(paymentId);
+    private LedgerEntryResponse findOriginalPaymentLedgerEntry(String paymentLedgerTransactionId) {
+        List<LedgerEntryResponse> entries = ledgerClient.findByTransactionId(paymentLedgerTransactionId);
         if (entries == null || entries.isEmpty()) {
-            throw new LedgerRefundRecordingException("원본 결제 원장을 찾을 수 없습니다. paymentId=" + paymentId);
+            throw new LedgerRefundRecordingException("원본 결제 원장을 찾을 수 없습니다. transactionId=" + paymentLedgerTransactionId);
         }
 
         return entries.stream()
@@ -195,7 +195,7 @@ public class RefundProcessor {
                         .filter(entry -> "PAYMENT".equals(entry.transactionType()))
                         .filter(entry -> "REVERSED".equals(entry.status()))
                         .findFirst())
-                .orElseThrow(() -> new LedgerRefundRecordingException("보정 가능한 원본 결제 원장을 찾을 수 없습니다. paymentId=" + paymentId));
+                .orElseThrow(() -> new LedgerRefundRecordingException("보정 가능한 원본 결제 원장을 찾을 수 없습니다. transactionId=" + paymentLedgerTransactionId));
     }
 
     private RefundStatus currentRefundStatus(String refundId) {

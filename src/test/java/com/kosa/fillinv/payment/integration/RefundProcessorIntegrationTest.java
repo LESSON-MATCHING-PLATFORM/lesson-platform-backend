@@ -197,7 +197,7 @@ class RefundProcessorIntegrationTest {
         given(tossPaymentClient.cancel(any()))
                 .willReturn(successResult(command));
         paymentRepository.save(payment(refund));
-        given(ledgerClient.findByTransactionId(refund.getPaymentId()))
+        given(ledgerClient.findByTransactionId(paymentLedgerTransactionId(refund)))
                 .willReturn(List.of(originalLedgerEntry(refund)));
         given(ledgerClient.recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class)))
                 .willThrow(new ResourceAccessException("ledger timeout"));
@@ -373,9 +373,13 @@ class RefundProcessorIntegrationTest {
                 .build();
     }
 
+    private String paymentLedgerTransactionId(Refund refund) {
+        return refund.getPaymentId();
+    }
+
     private void preparePaymentAndLedger(Refund refund) {
         paymentRepository.save(payment(refund));
-        given(ledgerClient.findByTransactionId(refund.getPaymentId()))
+        given(ledgerClient.findByTransactionId(paymentLedgerTransactionId(refund)))
                 .willReturn(List.of(originalLedgerEntry(refund)));
         given(ledgerClient.recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class)))
                 .willReturn(adjustmentLedgerEntry(refund));

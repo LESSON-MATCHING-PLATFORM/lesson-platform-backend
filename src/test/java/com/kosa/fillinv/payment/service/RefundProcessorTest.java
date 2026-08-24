@@ -44,6 +44,8 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class RefundProcessorTest {
 
+    private static final String PAYMENT_LEDGER_TRANSACTION_ID = "payment-001";
+
     @Mock
     private RefundStatusUpdateService refundStatusUpdateService;
 
@@ -100,7 +102,7 @@ class RefundProcessorTest {
         assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
         verify(refundStatusUpdateService).tryUpdateStatusToExecuting(eq(command.refundId()), any());
         verify(tossPaymentClient).cancel(any());
-        verify(ledgerClient).findByTransactionId("payment-001");
+        verify(ledgerClient).findByTransactionId(PAYMENT_LEDGER_TRANSACTION_ID);
         verify(ledgerClient).recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class));
         verify(refundStatusUpdateService).updateStatusToSuccess(
                 eq(command.refundId()),
@@ -147,9 +149,9 @@ class RefundProcessorTest {
                 .thenReturn(successResult());
         when(refundRepository.findById(command.refundId()))
                 .thenReturn(Optional.of(refund(command.refundId(), RefundStatus.EXECUTING)));
-        when(paymentRepository.findById("payment-001"))
+        when(paymentRepository.findById(PAYMENT_LEDGER_TRANSACTION_ID))
                 .thenReturn(Optional.of(payment()));
-        when(ledgerClient.findByTransactionId("payment-001"))
+        when(ledgerClient.findByTransactionId(PAYMENT_LEDGER_TRANSACTION_ID))
                 .thenReturn(List.of(originalLedgerEntry()));
         when(ledgerClient.recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class)))
                 .thenThrow(HttpServerErrorException.InternalServerError.class);
@@ -272,7 +274,7 @@ class RefundProcessorTest {
     private Refund refund(String refundId, RefundStatus status) {
         return Refund.builder()
                 .id(refundId)
-                .paymentId("payment-001")
+                .paymentId(PAYMENT_LEDGER_TRANSACTION_ID)
                 .paymentKey("payment-key")
                 .orderId("order-001")
                 .refundStatus(status)
@@ -283,7 +285,7 @@ class RefundProcessorTest {
 
     private Payment payment() {
         return Payment.builder()
-                .id("payment-001")
+                .id(PAYMENT_LEDGER_TRANSACTION_ID)
                 .buyerId("mentee-001")
                 .sellerId("mentor-001")
                 .orderId("order-001")
@@ -295,9 +297,9 @@ class RefundProcessorTest {
     private void stubLedgerAdjustmentSuccess(PGCancelCommand command) {
         when(refundRepository.findById(command.refundId()))
                 .thenReturn(Optional.of(refund(command.refundId(), RefundStatus.EXECUTING)));
-        when(paymentRepository.findById("payment-001"))
+        when(paymentRepository.findById(PAYMENT_LEDGER_TRANSACTION_ID))
                 .thenReturn(Optional.of(payment()));
-        when(ledgerClient.findByTransactionId("payment-001"))
+        when(ledgerClient.findByTransactionId(PAYMENT_LEDGER_TRANSACTION_ID))
                 .thenReturn(List.of(originalLedgerEntry()));
         when(ledgerClient.recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class)))
                 .thenReturn(adjustmentLedgerEntry());
@@ -306,9 +308,9 @@ class RefundProcessorTest {
     private LedgerEntryResponse originalLedgerEntry() {
         return new LedgerEntryResponse(
                 "ledger-entry-001",
-                "PAYMENT:payment-001:COMPLETED",
+                "PAYMENT:" + PAYMENT_LEDGER_TRANSACTION_ID + ":COMPLETED",
                 "PAYMENT",
-                "payment-001",
+                PAYMENT_LEDGER_TRANSACTION_ID,
                 "order-001",
                 "mentee-001",
                 "mentor-001",
