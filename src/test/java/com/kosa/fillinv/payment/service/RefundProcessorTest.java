@@ -1,12 +1,17 @@
 package com.kosa.fillinv.payment.service;
 
+import com.kosa.fillinv.payment.client.LedgerClient;
 import com.kosa.fillinv.payment.client.TossPaymentClient;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryRequest;
+import com.kosa.fillinv.payment.client.dto.LedgerEntryResponse;
 import com.kosa.fillinv.payment.domain.PSPConfirmationException;
 import com.kosa.fillinv.payment.domain.RefundExecutionResult;
 import com.kosa.fillinv.payment.domain.RefundExtraDetails;
+import com.kosa.fillinv.payment.entity.Payment;
 import com.kosa.fillinv.payment.entity.Refund;
 import com.kosa.fillinv.payment.entity.RefundStatus;
 import com.kosa.fillinv.payment.outbox.PaymentOutboxService;
+import com.kosa.fillinv.payment.repository.PaymentRepository;
 import com.kosa.fillinv.payment.repository.RefundRepository;
 import com.kosa.fillinv.payment.service.dto.PGCancelCommand;
 import com.kosa.fillinv.payment.service.dto.PaymentRefundResult;
@@ -23,9 +28,12 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -43,7 +51,13 @@ class RefundProcessorTest {
     private TossPaymentClient tossPaymentClient;
 
     @Mock
+    private LedgerClient ledgerClient;
+
+    @Mock
     private RefundRepository refundRepository;
+
+    @Mock
+    private PaymentRepository paymentRepository;
 
     @Mock
     private RefundRetryBackoffPolicy refundRetryBackoffPolicy;
@@ -79,12 +93,15 @@ class RefundProcessorTest {
         PGCancelCommand command = command();
         when(tossPaymentClient.cancel(any()))
                 .thenReturn(successResult());
+        stubLedgerAdjustmentSuccess(command);
 
         PaymentRefundResult result = refundProcessor.processPGCancel(command);
 
         assertThat(result.status()).isEqualTo(RefundStatus.SUCCESS);
         verify(refundStatusUpdateService).tryUpdateStatusToExecuting(eq(command.refundId()), any());
         verify(tossPaymentClient).cancel(any());
+        verify(ledgerClient).findByTransactionId("payment-001");
+        verify(ledgerClient).recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class));
         verify(refundStatusUpdateService).updateStatusToSuccess(
                 eq(command.refundId()),
                 eq("transaction-key"),
@@ -101,6 +118,7 @@ class RefundProcessorTest {
         PGCancelCommand command = command();
         when(tossPaymentClient.cancel(any()))
                 .thenReturn(successResult());
+        stubLedgerAdjustmentSuccess(command);
         doThrow(new IllegalStateException("booking cancel failed"))
                 .when(bookingCommandService)
                 .cancelByRefund(command.orderId());
@@ -116,8 +134,36 @@ class RefundProcessorTest {
         );
         verify(paymentOutboxService).saveRefundCompletedEvent(eq(command), any());
         verify(bookingCommandService).cancelByRefund(command.orderId());
+        verify(ledgerClient).recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class));
         verify(refundStatusUpdateService, never()).updateStatusToFailure(any(), any(), any());
         verify(refundStatusUpdateService, never()).updateStatusToUnknown(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("환불 Ledger 보정 실패 시 UNKNOWN으로 변경하고 완료 이벤트와 Booking 취소는 수행하지 않는다")
+    void processPGCancel_whenLedgerAdjustmentFails_updatesRefundUnknownOnly() {
+        PGCancelCommand command = command();
+        when(tossPaymentClient.cancel(any()))
+                .thenReturn(successResult());
+        when(refundRepository.findById(command.refundId()))
+                .thenReturn(Optional.of(refund(command.refundId(), RefundStatus.EXECUTING)));
+        when(paymentRepository.findById("payment-001"))
+                .thenReturn(Optional.of(payment()));
+        when(ledgerClient.findByTransactionId("payment-001"))
+                .thenReturn(List.of(originalLedgerEntry()));
+        when(ledgerClient.recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class)))
+                .thenThrow(HttpServerErrorException.InternalServerError.class);
+        when(refundRepository.getRetryCountByRefundId(command.refundId()))
+                .thenReturn(1);
+        when(refundRetryBackoffPolicy.nextAttemptAt(any(), eq(1)))
+                .thenReturn(nextAttemptAt);
+
+        PaymentRefundResult result = refundProcessor.processPGCancel(command);
+
+        assertThat(result.status()).isEqualTo(RefundStatus.UNKNOWN);
+        verify(refundStatusUpdateService).updateStatusToUnknown(eq(command.refundId()), any(), eq(nextAttemptAt));
+        verify(paymentOutboxService, never()).saveRefundCompletedEvent(any(), any());
+        verify(bookingCommandService, never()).cancelByRefund(any());
     }
 
     @Test
@@ -233,6 +279,68 @@ class RefundProcessorTest {
                 .refundAmount(1000)
                 .refundReason("단순 변심")
                 .build();
+    }
+
+    private Payment payment() {
+        return Payment.builder()
+                .id("payment-001")
+                .buyerId("mentee-001")
+                .sellerId("mentor-001")
+                .orderId("order-001")
+                .orderName("자바 레슨")
+                .amount(1000)
+                .build();
+    }
+
+    private void stubLedgerAdjustmentSuccess(PGCancelCommand command) {
+        when(refundRepository.findById(command.refundId()))
+                .thenReturn(Optional.of(refund(command.refundId(), RefundStatus.EXECUTING)));
+        when(paymentRepository.findById("payment-001"))
+                .thenReturn(Optional.of(payment()));
+        when(ledgerClient.findByTransactionId("payment-001"))
+                .thenReturn(List.of(originalLedgerEntry()));
+        when(ledgerClient.recordAdjustment(eq("ledger-entry-001"), any(LedgerEntryRequest.class)))
+                .thenReturn(adjustmentLedgerEntry());
+    }
+
+    private LedgerEntryResponse originalLedgerEntry() {
+        return new LedgerEntryResponse(
+                "ledger-entry-001",
+                "PAYMENT:payment-001:COMPLETED",
+                "PAYMENT",
+                "payment-001",
+                "order-001",
+                "mentee-001",
+                "mentor-001",
+                new BigDecimal("1000"),
+                "KRW",
+                "CREDIT",
+                "POSTED",
+                "결제 완료",
+                Instant.parse("2026-07-27T00:00:00Z"),
+                null,
+                0L
+        );
+    }
+
+    private LedgerEntryResponse adjustmentLedgerEntry() {
+        return new LedgerEntryResponse(
+                "ledger-refund-001",
+                "REFUND:refund-001:COMPLETED",
+                "REFUND",
+                "refund-001",
+                "order-001",
+                "mentee-001",
+                "mentor-001",
+                new BigDecimal("1000"),
+                "KRW",
+                "DEBIT",
+                "POSTED",
+                "환불 완료",
+                Instant.parse("2026-07-27T00:00:00Z"),
+                null,
+                0L
+        );
     }
 
     private void assertUnknownError(RuntimeException exception) {
